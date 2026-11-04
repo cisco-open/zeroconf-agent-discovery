@@ -1,0 +1,128 @@
+# Zeroconf Agent Discovery
+
+[![Release](https://img.shields.io/github/v/release/cisco-open/zeroconf-agent-discovery?display_name=tag)](CHANGELOG.md)
+[![Lint](https://github.com/cisco-open/zeroconf-agent-discovery/actions/workflows/lint.yml/badge.svg?branch=main)](https://github.com/marketplace/actions/super-linter)
+[![Contributor-Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-fbab2c.svg)](CODE_OF_CONDUCT.md)
+[![Maintainer](https://img.shields.io/badge/Maintainer-Cisco-00bceb.svg)](https://opensource.cisco.com)
+
+Discover AI agents on the local network with plain mDNS/DNS-SD, as specified in
+[Zero-Configuration Agent Discovery][draft].
+
+## About The Project
+
+Agent protocols such as the Model Context Protocol (MCP) and Agent2Agent (A2A)
+find agents through documents fetched over HTTPS from a well-known URI. That
+assumes the client already knows a host name or a catalog, and on a local
+network there is often neither.
+
+[draft-jakab-dawn-agent-discovery-mdns][draft] advertises agents with DNS-Based
+Service Discovery (DNS-SD, [RFC 6763][rfc6763]) over Multicast DNS (mDNS,
+[RFC 6762][rfc6762]). It uses one service type, `_agents._tcp`, and one service
+instance per agent protocol, named by the `proto` TXT key and optionally by a
+subtype (`_mcp._sub`, `_a2a._sub`). A few more TXT keys tell a client, before it
+connects, how to reach the endpoint, which logical agent it belongs to
+(`desc-ref`), and whether its cached description is still current
+(`desc-ref-digest`).
+
+This repository holds implementations of the draft and the tooling used to test
+them against each other. Discovery records are not authenticated, so the clients
+here list what they find and connect only when the user asks them to.
+
+### Components
+
+| Component                                                                                                                                       | Status  |
+| ----------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| Command-line tools to announce and browse `_agents._tcp` instances, in Python on top of [python-zeroconf][python-zeroconf]                      | Planned |
+| Toy MCP servers and A2A agents that announce themselves, including an agent that offers both protocols as two instances sharing one `desc-ref` | Planned |
+| MCP server discovery for [Codex CLI][codex]: a patch series against a pinned upstream commit, with a script that applies it and builds the CLI | Planned |
+| Interoperability tests across Apple mDNSResponder, Avahi, python-zeroconf and the Rust [`mdns-sd`][mdns-sd] crate, subtype browsing included   | Planned |
+
+The first target is the [IETF 127 Hackathon][hackathon] in November 2026.
+
+The project publishes source code only. It distributes no binaries: the patched
+Codex CLI is built locally, from upstream source.
+
+## Getting Started
+
+### Prerequisites
+
+- macOS or Linux. mDNS is link-local, so announcers and browsers must share a
+  link, on a network that forwards multicast.
+- [uv][uv] for the Python components.
+- A Rust toolchain, only to build the patched Codex CLI.
+
+### Installation
+
+1. Clone the repository
+
+   ```sh
+   git clone https://github.com/cisco-open/zeroconf-agent-discovery.git
+   ```
+
+2. Follow the setup instructions in the README of each component.
+
+## Usage
+
+The announcements are plain DNS-SD, so any DNS-SD tool can browse them. On
+macOS:
+
+```sh
+dns-sd -B _agents._tcp
+```
+
+On Linux, with Avahi:
+
+```sh
+avahi-browse --resolve _agents._tcp
+```
+
+To announce an MCP server of your own, listening on port 8003 with its endpoint
+at `/mcp`:
+
+```sh
+dns-sd -R notes _agents._tcp,_mcp local 8003 txtvers=1 proto=mcp path=/mcp proto-ver=2025-11-25
+```
+
+```sh
+avahi-publish-service --subtype _mcp._sub._agents._tcp notes _agents._tcp 8003 txtvers=1 proto=mcp path=/mcp proto-ver=2025-11-25
+```
+
+See the [draft][draft] for the full set of TXT keys, and for A2A agents.
+
+## Roadmap
+
+See the [open issues](https://github.com/cisco-open/zeroconf-agent-discovery/issues)
+for a list of proposed features (and known issues).
+
+## Contributing
+
+Contributions are what make the open source community such an amazing place to
+learn, inspire, and create. Any contributions you make are **greatly
+appreciated**. For detailed contributing guidelines, please see
+[CONTRIBUTING.md](CONTRIBUTING.md)
+
+## License
+
+Distributed under the `Apache-2.0` License. See [LICENSE](LICENSE) for more
+information.
+
+## Contact
+
+Lori Jakab - [@ljakab](https://github.com/ljakab)
+
+Project Link:
+[https://github.com/cisco-open/zeroconf-agent-discovery](https://github.com/cisco-open/zeroconf-agent-discovery)
+
+## Acknowledgements
+
+This template was adapted from
+[https://github.com/othneildrew/Best-README-Template](https://github.com/othneildrew/Best-README-Template).
+
+[draft]: https://datatracker.ietf.org/doc/draft-jakab-dawn-agent-discovery-mdns/
+[rfc6762]: https://www.rfc-editor.org/rfc/rfc6762
+[rfc6763]: https://www.rfc-editor.org/rfc/rfc6763
+[python-zeroconf]: https://github.com/python-zeroconf/python-zeroconf
+[codex]: https://github.com/openai/codex
+[mdns-sd]: https://crates.io/crates/mdns-sd
+[uv]: https://docs.astral.sh/uv/
+[hackathon]: https://wiki.ietf.org/meeting/127/hackathon
