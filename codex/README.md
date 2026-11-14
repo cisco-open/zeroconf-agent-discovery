@@ -64,6 +64,14 @@ do not edit files in it by hand.
 "$(codex/build.sh path)" --no-daemon
 ```
 
+fish does not allow a command substitution in place of a command name, so keep
+the path in a variable there:
+
+```fish
+set codex (codex/build.sh path)
+$codex --no-daemon
+```
+
 The binary identifies itself as a modified build: `--version` adds this
 repository's commit, as in `codex-cli 0.167.0 (zeroconf-agent-discovery
 <commit>)`, and the TUI header and `/status` read `OpenAI Codex (v0.167.0) ·
@@ -117,6 +125,32 @@ login, the configuration, the configured MCP servers and the session history.
 Codex tolerates a state database that a newer Codex has already migrated, so
 sharing the home with a newer installed Codex works. To keep the two apart,
 point `CODEX_HOME` at another existing directory, and log in again there.
+
+### A separate Codex home for demos
+
+On a shared screen, `/mcp` shows every MCP server in your configuration, and
+the session runs with your logins. A Codex home of its own keeps a demo apart:
+it starts with no MCP servers, no MCP credentials and no history, and a
+`codex mcp add` during the demo writes to its `config.toml` only. The apps and
+plugins of your ChatGPT account come with the account, not with the home, so
+the demo configuration turns them off:
+
+```sh
+export CODEX_HOME="$HOME/codex-home-demo"
+mkdir -p "$CODEX_HOME"
+printf '[features]\napps = false\nplugins = false\n' >"$CODEX_HOME/config.toml"
+"$(codex/build.sh path)" login
+```
+
+In fish, set the variable with `set -x CODEX_HOME ~/codex-home-demo`, and run
+the binary through a variable as shown above.
+
+Rehearse once: start the binary in the folder you will demo from, answer the
+trust prompt and the first-run screens, and check that `/mcp verbose` lists
+nothing until a server is announced. A workspace administrator can enforce
+apps or plugins through managed configuration, and the rehearsal shows whether
+that happens. Afterwards, run the binary's `logout` with the same `CODEX_HOME`,
+and delete the directory.
 
 ## Changing the overlay or the patches
 
