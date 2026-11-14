@@ -1,0 +1,2 @@
+# Default build directory of codex/build.sh (upstream source and Cargo output)
+codex/.build/

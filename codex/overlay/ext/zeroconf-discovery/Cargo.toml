@@ -1,0 +1,28 @@
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+edition.workspace = true
+license.workspace = true
+name = "zeroconf-discovery"
+version.workspace = true
+
+[lib]
+name = "zeroconf_discovery"
+path = "src/lib.rs"
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+codex-config = { workspace = true }
+codex-core = { workspace = true }
+codex-extension-api = { workspace = true }
+mdns-sd = "0.21.7"
+serde_json = { workspace = true }
+tracing = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }

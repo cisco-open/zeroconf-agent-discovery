@@ -12,7 +12,7 @@ Discover AI agents on the local network with plain mDNS/DNS-SD, as specified in
 
 Agent protocols such as the Model Context Protocol (MCP) and Agent2Agent (A2A)
 find agents through documents fetched over HTTPS from a well-known URI. That
-assumes the client already knows a host name or a catalog, and on a local
+assumes the client already knows a hostname or a catalog, and on a local
 network there is often neither.
 
 [draft-jakab-dawn-agent-discovery-mdns][draft] advertises agents with DNS-Based
@@ -30,17 +30,34 @@ here list what they find and connect only when the user asks them to.
 
 ### Components
 
-| Component                                                                                                                                       | Status  |
-| ----------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| Command-line tools to announce and browse `_agents._tcp` instances, in Python on top of [python-zeroconf][python-zeroconf]                      | Planned |
-| Toy MCP servers and A2A agents that announce themselves, including an agent that offers both protocols as two instances sharing one `desc-ref` | Planned |
-| MCP server discovery for [Codex CLI][codex]: a patch series against a pinned upstream commit, with a script that applies it and builds the CLI | Planned |
-| Interoperability tests across Apple mDNSResponder, Avahi, python-zeroconf and the Rust [`mdns-sd`][mdns-sd] crate, subtype browsing included   | Planned |
+| Component                                                                                                                                      | Status                           |
+| ---------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| Command-line tools to announce and browse `_agents._tcp` instances, in Python on top of [python-zeroconf][python-zeroconf]                     | Planned                          |
+| Toy MCP servers and A2A agents that announce themselves, including an agent that offers both protocols as two instances sharing one `desc-ref` | Planned                          |
+| MCP server discovery for [Codex CLI][codex]: a patch series against a pinned upstream commit, with a script that applies it and builds the CLI | [In progress](#codex-cli-status) |
+| Interoperability tests across Apple mDNSResponder, Avahi, python-zeroconf and the Rust [`mdns-sd`][mdns-sd] crate, subtype browsing included   | Planned                          |
 
 The first target is the [IETF 127 Hackathon][hackathon] in November 2026.
 
 The project publishes source code only. It distributes no binaries: the patched
 Codex CLI is built locally, from upstream source.
+
+### Codex CLI status
+
+The goal for the hackathon: MCP servers announced on the local network show up
+in the `/mcp` list of Codex CLI as disabled entries, so that Codex connects to
+none of them until the user asks it to.
+
+| Capability                                                                                                                                                                     | Status                                                                                        |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| Build the patched CLI from the pinned upstream release, with `codex/build.sh`                                                                                                  | Works on macOS; untested on Linux                                                             |
+| Run the discovery code inside the Codex app-server                                                                                                                             | Works                                                                                         |
+| Turn an MCP advertisement in the format of [draft -01][draft] into a Codex server entry: TXT checks, the URL from the SRV target, port and `path`, the name `<instance>_local` | Works, with unit tests                                                                        |
+| Browse `_agents._tcp` on the local network                                                                                                                                     | Works on one host; across hosts untested                                                      |
+| List the discovered servers in `/mcp`, disabled                                                                                                                                | Works; they come and go in a running session, and those found after startup show as `unknown` |
+| Connect to a discovered server                                                                                                                                                 | Planned                                                                                       |
+
+Build and run instructions are in [codex/README.md](codex/README.md).
 
 ## Getting Started
 
@@ -59,7 +76,7 @@ Codex CLI is built locally, from upstream source.
    git clone https://github.com/cisco-open/zeroconf-agent-discovery.git
    ```
 
-2. Follow the setup instructions in the README of each component.
+2. Follow the setup instructions in the `README.md` of each component.
 
 ## Usage
 

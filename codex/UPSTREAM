@@ -1,0 +1,9 @@
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+# SPDX-License-Identifier: Apache-2.0
+
+# Upstream OpenAI Codex release that the overlay and the patches apply to.
+# Sourced by build.sh. Record the commit, not only the tag: the tag is an
+# annotated tag object and could be moved; a commit cannot.
+CODEX_REPO=https://github.com/openai/codex.git
+CODEX_TAG=rust-v0.167.0
+CODEX_COMMIT=086ccc833bc9cf01024ad2dd6af7dbd421b6bf9a

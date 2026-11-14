@@ -1,0 +1,78 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Lori Jakab <lojakab@cisco.com>
+Date: Mon, 9 Nov 2026 14:37:39 +0100
+Subject: [PATCH] Wire the zeroconf-discovery crate into the app-server
+Organization: Cisco Systems, Inc.
+
+Copyright 2026 Cisco Systems, Inc. and its affiliates
+SPDX-License-Identifier: Apache-2.0
+
+Signed-off-by: Lori Jakab <lojakab@cisco.com>
+---
+ codex-rs/Cargo.toml                   | 4 ++++
+ codex-rs/app-server/Cargo.toml        | 3 +++
+ codex-rs/app-server/src/extensions.rs | 3 +++
+ 3 files changed, 10 insertions(+)
+
+diff --git a/codex-rs/Cargo.toml b/codex-rs/Cargo.toml
+index 0107584..57f45fd 100644
+--- a/codex-rs/Cargo.toml
++++ b/codex-rs/Cargo.toml
+@@ -1,3 +1,5 @@
++# Modified by Cisco Systems, Inc. and its affiliates, 2026, for zeroconf-agent-discovery: https://github.com/cisco-open/zeroconf-agent-discovery
++
+ [workspace]
+ members = [
+     "aws-auth",
+@@ -80,6 +82,7 @@ members = [
+     "ext/queue",
+     "ext/skills",
+     "ext/web-search",
++    "ext/zeroconf-discovery",
+     "external-agent-migration",
+     "keyring-store",
+     "file-search",
+@@ -265,6 +268,7 @@ codex-mermaid = { path = "mermaid" }
+ codex-message-history = { path = "message-history" }
+ codex-memories-extension = { path = "ext/memories" }
+ codex-web-search-extension = { path = "ext/web-search" }
++zeroconf-discovery = { path = "ext/zeroconf-discovery" }
+ codex-memories-read = { path = "memories/read" }
+ codex-memories-write = { path = "memories/write" }
+ codex-mcp = { path = "codex-mcp" }
+diff --git a/codex-rs/app-server/Cargo.toml b/codex-rs/app-server/Cargo.toml
+index b4553fc..09c1108 100644
+--- a/codex-rs/app-server/Cargo.toml
++++ b/codex-rs/app-server/Cargo.toml
+@@ -1,3 +1,5 @@
++# Modified by Cisco Systems, Inc. and its affiliates, 2026, for zeroconf-agent-discovery: https://github.com/cisco-open/zeroconf-agent-discovery
++
+ [package]
+ name = "codex-app-server"
+ version.workspace = true
+@@ -79,6 +81,7 @@ codex-websocket-auth = { workspace = true }
+ codex-memories-write = { workspace = true }
+ codex-mcp = { workspace = true }
+ codex-mcp-extension = { workspace = true }
++zeroconf-discovery = { workspace = true }
+ codex-model-provider = { workspace = true }
+ codex-model-provider-info = { workspace = true }
+ codex-models-manager = { workspace = true }
+diff --git a/codex-rs/app-server/src/extensions.rs b/codex-rs/app-server/src/extensions.rs
+index 733df70..d3559cb 100644
+--- a/codex-rs/app-server/src/extensions.rs
++++ b/codex-rs/app-server/src/extensions.rs
+@@ -1,3 +1,5 @@
++// Modified by Cisco Systems, Inc. and its affiliates, 2026, for zeroconf-agent-discovery: https://github.com/cisco-open/zeroconf-agent-discovery
++
+ use std::sync::Arc;
+ use std::sync::Weak;
+ use std::time::Duration;
+@@ -108,6 +110,7 @@ pub(crate) fn thread_extensions(
+     codex_memories_extension::install(&mut builder, codex_otel::global());
+     codex_mcp_extension::install(&mut builder);
+     codex_mcp_extension::install_plugins(&mut builder, environment_manager);
++    zeroconf_discovery::install(&mut builder);
+     codex_web_search_extension::install(&mut builder, auth_manager.clone());
+     codex_image_generation_extension::install(&mut builder, auth_manager, |config: &Config| {
+         Some(config.codex_home.clone())

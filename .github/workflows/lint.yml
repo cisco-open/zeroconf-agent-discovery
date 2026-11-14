@@ -35,4 +35,11 @@ jobs:
           MARKDOWN_CONFIG_FILE: ".markdownlint.yml"
           YAML_CONFIG_FILE: ".yamllint.yml"
           VALIDATE_ALL_CODEBASE: false
+          # The Rust crate in codex/overlay builds only inside upstream Codex's
+          # edition-2024 workspace, so rustfmt and clippy run there, with the
+          # toolchain that upstream pins, and not here.
+          VALIDATE_RUST_2015: false
+          VALIDATE_RUST_2018: false
+          VALIDATE_RUST_2021: false
+          VALIDATE_RUST_CLIPPY: false
           MULTI_STATUS: false
