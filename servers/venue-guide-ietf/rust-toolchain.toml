@@ -1,0 +1,6 @@
+# Copyright 2026 Cisco Systems, Inc. and its affiliates
+# SPDX-License-Identifier: Apache-2.0
+
+[toolchain]
+channel = "1.95.0"
+components = ["clippy", "rustfmt"]

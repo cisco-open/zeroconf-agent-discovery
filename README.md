@@ -30,12 +30,13 @@ here list what they find and connect only when the user asks them to.
 
 ### Components
 
-| Component                                                                                                                                      | Status                           |
-| ---------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
-| Command-line tools to announce and browse `_agents._tcp` instances, in Python on top of [python-zeroconf][python-zeroconf]                     | Planned                          |
-| Toy MCP servers and A2A agents that announce themselves, including an agent that offers both protocols as two instances sharing one `desc-ref` | Planned                          |
-| MCP server discovery for [Codex CLI][codex]: a patch series against a pinned upstream commit, with a script that applies it and builds the CLI | [In progress](#codex-cli-status) |
-| Interoperability tests across Apple mDNSResponder, Avahi, python-zeroconf and the Rust [`mdns-sd`][mdns-sd] crate, subtype browsing included   | Planned                          |
+| Component                                                                                                                                                       | Status                           |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| Command-line tools to announce and browse `_agents._tcp` instances, in Rust on top of [`mdns-sd`][mdns-sd]                                                      | Planned                          |
+| [An unofficial IETF meeting venue guide](servers/venue-guide-ietf/): an MCP server with tools over the live meeting agenda, which announces itself              | Works                            |
+| A2A agents that announce themselves, including one that offers both protocols as two instances sharing one `desc-ref`                                           | Planned                          |
+| MCP server discovery for [Codex CLI][codex]: a patch series against a pinned upstream commit, with a script that applies it and builds the CLI                  | [In progress](#codex-cli-status) |
+| Interoperability tests across Apple mDNSResponder, Avahi, [python-zeroconf][python-zeroconf] and the Rust [`mdns-sd`][mdns-sd] crate, subtype browsing included | Planned                          |
 
 The first target is the [IETF 127 Hackathon][hackathon] in November 2026.
 
@@ -55,7 +56,7 @@ none of them until the user asks it to.
 | Turn an MCP advertisement in the format of [draft -01][draft] into a Codex server entry: TXT checks, the URL from the SRV target, port and `path`, the name `lan-<instance>` | Works, with unit tests                                                                        |
 | Browse `_agents._tcp` on the local network                                                                                                                                   | Works on one host; across hosts untested                                                      |
 | List the discovered servers in `/mcp`, disabled                                                                                                                              | Works; they come and go in a running session, and those found after startup show as `unknown` |
-| Connect to a discovered server                                                                                                                                               | Planned                                                                                       |
+| Connect to a discovered server                                                                                                                                               | Works, with `codex mcp add`                                                                   |
 
 Build and run instructions are in [codex/README.md](codex/README.md).
 
@@ -65,8 +66,8 @@ Build and run instructions are in [codex/README.md](codex/README.md).
 
 - macOS or Linux. mDNS is link-local, so announcers and browsers must share a
   link, on a network that forwards multicast.
-- [uv][uv] for the Python components.
-- A Rust toolchain, only to build the patched Codex CLI.
+- [rustup](https://rustup.rs), to build the venue guide and the patched Codex
+  CLI. Each pins its Rust toolchain, which rustup installs when it is missing.
 
 ### Installation
 
@@ -141,5 +142,4 @@ This template was adapted from
 [python-zeroconf]: https://github.com/python-zeroconf/python-zeroconf
 [codex]: https://github.com/openai/codex
 [mdns-sd]: https://crates.io/crates/mdns-sd
-[uv]: https://docs.astral.sh/uv/
 [hackathon]: https://wiki.ietf.org/meeting/127/hackathon
