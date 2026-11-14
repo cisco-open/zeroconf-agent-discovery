@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Lori Jakab <lojakab@cisco.com>
+Date: Mon, 9 Nov 2026 13:01:38 +0100
+Subject: [PATCH] Disable the startup update check by default
+Organization: Cisco Systems, Inc.
+
+Copyright 2026 Cisco Systems, Inc. and its affiliates
+SPDX-License-Identifier: Apache-2.0
+
+Signed-off-by: Lori Jakab <lojakab@cisco.com>
+---
+ codex-rs/core/src/config/mod.rs | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/codex-rs/core/src/config/mod.rs b/codex-rs/core/src/config/mod.rs
+index 8d93436..bf3d6e4 100644
+--- a/codex-rs/core/src/config/mod.rs
++++ b/codex-rs/core/src/config/mod.rs
+@@ -1,3 +1,5 @@
++// Modified by Cisco Systems, Inc. and its affiliates, 2026, for zeroconf-agent-discovery: https://github.com/cisco-open/zeroconf-agent-discovery
++
+ use crate::config::edit::ConfigEdit;
+ use crate::config::edit::ConfigEditsBuilder;
+ use crate::context::world_state::validate_managed_developer_instructions;
+@@ -4313,7 +4315,9 @@ impl Config {
+         let compact_prompt = compact_prompt.or(file_compact_prompt);
+         let review_model = override_review_model.or(cfg.review_model);
+ 
+-        let check_for_update_on_startup = cfg.check_for_update_on_startup.unwrap_or(true);
++        // zeroconf-agent-discovery: a pinned, modified build; do not offer
++        // upgrades to an upstream release unless the user asks for them.
++        let check_for_update_on_startup = cfg.check_for_update_on_startup.unwrap_or(false);
+         let model_catalog = load_model_catalog(cfg.model_catalog_json.clone())?;
+ 
+         let log_dir = cfg
