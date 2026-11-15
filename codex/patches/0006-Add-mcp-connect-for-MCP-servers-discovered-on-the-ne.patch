@@ -1,0 +1,745 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Lori Jakab <lojakab@cisco.com>
+Date: Sat, 14 Nov 2026 19:08:58 -0800
+Subject: [PATCH] Add /mcp connect, for MCP servers discovered on the network
+Organization: Cisco Systems, Inc.
+
+Copyright 2026 Cisco Systems, Inc. and its affiliates
+SPDX-License-Identifier: Apache-2.0
+
+Signed-off-by: Lori Jakab <lojakab@cisco.com>
+---
+ .../src/protocol/v2/mcp.rs                    |   6 +
+ .../src/protocol/v2/tests.rs                  |   5 +
+ .../src/request_processors/mcp_processor.rs   |  11 ++
+ codex-rs/tui/src/app/background_requests.rs   | 130 ++++++++++++++++++
+ codex-rs/tui/src/app/event_dispatch.rs        |  15 ++
+ codex-rs/tui/src/app/tests.rs                 |   1 +
+ codex-rs/tui/src/app_event.rs                 |  25 ++++
+ codex-rs/tui/src/chatwidget.rs                |   4 +
+ codex-rs/tui/src/chatwidget/mcp_connect.rs    |  64 +++++++++
+ codex-rs/tui/src/chatwidget/slash_dispatch.rs |  10 +-
+ codex-rs/tui/src/chatwidget/tests.rs          |   4 +
+ .../src/chatwidget/tests/mcp_connect_tests.rs |  84 +++++++++++
+ .../src/chatwidget/tests/slash_commands.rs    |  17 ++-
+ codex-rs/tui/src/history_cell/mcp.rs          |  17 ++-
+ codex-rs/tui/src/history_cell/mcp_tests.rs    |   3 +
+ codex-rs/tui/src/history_cell/tests.rs        |   2 +
+ 16 files changed, 392 insertions(+), 6 deletions(-)
+ create mode 100644 codex-rs/tui/src/chatwidget/mcp_connect.rs
+ create mode 100644 codex-rs/tui/src/chatwidget/tests/mcp_connect_tests.rs
+
+diff --git a/codex-rs/app-server-protocol/src/protocol/v2/mcp.rs b/codex-rs/app-server-protocol/src/protocol/v2/mcp.rs
+index 5351dc3..a605614 100644
+--- a/codex-rs/app-server-protocol/src/protocol/v2/mcp.rs
++++ b/codex-rs/app-server-protocol/src/protocol/v2/mcp.rs
+@@ -89,6 +89,12 @@ pub struct McpServerStatus {
+     /// ID of the extension that contributed the server, such as
+     /// `zeroconf_discovery`; null for servers from any other source.
+     pub extension_id: Option<String>,
++    // zeroconf-agent-discovery: what a client needs to add such a server to
++    // the configuration, which `httpOrigin` leaves out.
++    /// URL of a streamable HTTP server that an extension contributed, so that a
++    /// client can add it to the configuration; null for servers from any other
++    /// source, whose URLs may carry credentials, and for other transports.
++    pub extension_server_url: Option<String>,
+     /// HTTP origin of the effective configured endpoint, including plugin servers.
+     /// Excludes credentials, path, query, and fragment; null for non-HTTP transports.
+     pub http_origin: Option<String>,
+diff --git a/codex-rs/app-server-protocol/src/protocol/v2/tests.rs b/codex-rs/app-server-protocol/src/protocol/v2/tests.rs
+index d7f35c1..1f3f9c6 100644
+--- a/codex-rs/app-server-protocol/src/protocol/v2/tests.rs
++++ b/codex-rs/app-server-protocol/src/protocol/v2/tests.rs
+@@ -2697,6 +2697,7 @@ fn mcp_server_status_serializes_absent_server_info_as_null() {
+             runtime_status: None,
+             plugin_id: None,
+             extension_id: None,
++            extension_server_url: None,
+             http_origin: None,
+             server_info: None,
+             tools: HashMap::new(),
+@@ -2715,6 +2716,7 @@ fn mcp_server_status_serializes_absent_server_info_as_null() {
+                 "runtimeStatus": null,
+                 "pluginId": null,
+                 "extensionId": null,
++                "extensionServerUrl": null,
+                 "httpOrigin": null,
+                 "serverInfo": null,
+                 "serverCapabilities": null,
+@@ -2752,6 +2754,7 @@ fn mcp_server_status_accepts_older_inventory_without_runtime_status() {
+             runtime_status: None,
+             plugin_id: None,
+             extension_id: None,
++            extension_server_url: None,
+             http_origin: None,
+             server_info: None,
+             tools: HashMap::new(),
+@@ -2828,6 +2831,7 @@ fn mcp_server_status_serializes_absent_server_info_metadata_as_null() {
+             runtime_status: None,
+             plugin_id: Some("lookup@test".to_string()),
+             extension_id: None,
++            extension_server_url: None,
+             http_origin: None,
+             server_info: Some(McpServerInfo {
+                 name: "lookup-server".to_string(),
+@@ -2853,6 +2857,7 @@ fn mcp_server_status_serializes_absent_server_info_metadata_as_null() {
+                 "runtimeStatus": null,
+                 "pluginId": "lookup@test",
+                 "extensionId": null,
++                "extensionServerUrl": null,
+                 "httpOrigin": null,
+                 "serverCapabilities": null,
+                 "toolListMeta": null,
+diff --git a/codex-rs/app-server/src/request_processors/mcp_processor.rs b/codex-rs/app-server/src/request_processors/mcp_processor.rs
+index 0e2caa7..5e5105a 100644
+--- a/codex-rs/app-server/src/request_processors/mcp_processor.rs
++++ b/codex-rs/app-server/src/request_processors/mcp_processor.rs
+@@ -582,6 +582,17 @@ impl McpRequestProcessor {
+                         | McpServerSource::Config
+                         | McpServerSource::Compatibility { .. } => None,
+                     }),
++                // zeroconf-agent-discovery: the full URL, only for servers
++                // that an extension contributed.
++                extension_server_url: mcp_config.mcp_server_catalog.server(name).and_then(
++                    |server| match (server.source(), &server.config().transport) {
++                        (
++                            McpServerSource::Extension { .. },
++                            McpServerTransportConfig::StreamableHttp { url, .. },
++                        ) => Some(url.clone()),
++                        _ => None,
++                    },
++                ),
+                 http_origin: mcp_config
+                     .mcp_server_catalog
+                     .server(name)
+diff --git a/codex-rs/tui/src/app/background_requests.rs b/codex-rs/tui/src/app/background_requests.rs
+index 5f06ebe..7538436 100644
+--- a/codex-rs/tui/src/app/background_requests.rs
++++ b/codex-rs/tui/src/app/background_requests.rs
+@@ -15,6 +15,7 @@ use crate::chatwidget::ThreadUsageOutcome;
+ use crate::config_update::format_config_error;
+ use codex_app_server_protocol::AppsListParams;
+ use codex_app_server_protocol::AppsListResponse;
++use codex_app_server_protocol::ConfigEdit;
+ use codex_app_server_protocol::ConsumeAccountRateLimitResetCreditParams;
+ use codex_app_server_protocol::ConsumeAccountRateLimitResetCreditResponse;
+ use codex_app_server_protocol::GetAccountRateLimitsParams;
+@@ -27,6 +28,7 @@ use codex_app_server_protocol::MarketplaceRemoveResponse;
+ use codex_app_server_protocol::MarketplaceUpgradeParams;
+ use codex_app_server_protocol::MarketplaceUpgradeResponse;
+ use codex_app_server_protocol::McpServerOauthLoginParams;
++use codex_app_server_protocol::McpServerRefreshResponse;
+ use codex_app_server_protocol::RequestId;
+ 
+ use crate::hooks_rpc::HooksListTarget;
+@@ -91,6 +93,75 @@ impl App {
+         });
+     }
+ 
++    /// zeroconf-agent-discovery: fetches the MCP servers for the `/mcp connect`
++    /// picker, which offers those discovered on the local network.
++    pub(super) fn fetch_mcp_connect_candidates(&self, app_server: &AppServerSession) {
++        let request_handle = app_server.request_handle();
++        let app_event_tx = self.app_event_tx.clone();
++        tokio::spawn(async move {
++            let result = fetch_all_mcp_server_statuses(
++                request_handle,
++                McpServerStatusDetail::ToolsAndAuthOnly,
++                /*thread_id*/ None,
++            )
++            .await
++            .map_err(|err| err.to_string());
++            app_event_tx.send(AppEvent::McpConnectPickerLoaded { result });
++        });
++    }
++
++    pub(super) fn handle_mcp_connect_candidates(
++        &mut self,
++        result: Result<Vec<McpServerStatus>, String>,
++    ) {
++        match result {
++            Ok(statuses) => self.chat_widget.open_mcp_connect_picker(&statuses),
++            Err(err) => self
++                .chat_widget
++                .add_error_message(format!("Failed to load MCP servers: {err}")),
++        }
++    }
++
++    /// zeroconf-agent-discovery: adds a discovered MCP server to the user's
++    /// configuration, as `codex mcp add` would, then reloads the MCP servers,
++    /// so that Codex connects to it. From then on, the server comes from the
++    /// configuration, and the discovery extension no longer contributes it.
++    pub(super) fn connect_discovered_mcp_server(
++        &self,
++        app_server: &AppServerSession,
++        name: String,
++        url: String,
++    ) {
++        let request_handle = app_server.request_handle();
++        let app_event_tx = self.app_event_tx.clone();
++        tokio::spawn(async move {
++            let result = add_mcp_server_and_reload(request_handle, &name, url)
++                .await
++                .map_err(|err| err.to_string());
++            app_event_tx.send(AppEvent::DiscoveredMcpServerConnected { name, result });
++        });
++    }
++
++    pub(super) fn handle_discovered_mcp_server_connected(
++        &mut self,
++        name: String,
++        result: Result<(), String>,
++    ) {
++        match result {
++            Ok(()) => {
++                self.chat_widget.add_info_message(
++                    format!("Added {name} to config.toml."),
++                    /*hint*/ Some("Codex connects to it now.".to_string()),
++                );
++                self.chat_widget
++                    .add_mcp_output(McpServerStatusDetail::ToolsAndAuthOnly);
++            }
++            Err(err) => self
++                .chat_widget
++                .add_error_message(format!("Failed to add {name}: {err}")),
++        }
++    }
++
+     fn mcp_inventory_request_thread_id(&self, thread_id: Option<ThreadId>) -> Option<ThreadId> {
+         thread_id.filter(|thread_id| {
+             self.active_thread_id == Some(*thread_id)
+@@ -819,6 +890,47 @@ pub(super) async fn fetch_all_mcp_server_statuses(
+     Ok(statuses)
+ }
+ 
++/// zeroconf-agent-discovery: the configuration entry for a discovered MCP
++/// server, `[mcp_servers.<name>]` with its URL, as `codex mcp add --url`
++/// writes it. Discovered names consist of letters, digits, `-` and `_`, so
++/// they need no quoting in the key path.
++pub(super) fn discovered_mcp_server_edit(name: &str, url: String) -> ConfigEdit {
++    ConfigEdit {
++        key_path: format!("mcp_servers.{name}"),
++        value: serde_json::json!({ "url": url }),
++        merge_strategy: MergeStrategy::Upsert,
++    }
++}
++
++async fn add_mcp_server_and_reload(
++    request_handle: AppServerRequestHandle,
++    name: &str,
++    url: String,
++) -> Result<()> {
++    let request_id = RequestId::String(format!("mcp-connect-write-{}", Uuid::new_v4()));
++    let _: ConfigWriteResponse = request_handle
++        .request_typed(ClientRequest::ConfigBatchWrite {
++            request_id,
++            params: ConfigBatchWriteParams {
++                edits: vec![discovered_mcp_server_edit(name, url)],
++                file_path: None,
++                expected_version: None,
++                reload_user_config: false,
++            },
++        })
++        .await
++        .wrap_err("config/batchWrite failed while adding an MCP server in TUI")?;
++    let request_id = RequestId::String(format!("mcp-connect-reload-{}", Uuid::new_v4()));
++    let _: McpServerRefreshResponse = request_handle
++        .request_typed(ClientRequest::McpServerRefresh {
++            request_id,
++            params: None,
++        })
++        .await
++        .wrap_err("config/mcpServer/reload failed in TUI")?;
++    Ok(())
++}
++
+ pub(super) async fn fetch_account_rate_limits(
+     request_handle: AppServerRequestHandle,
+     origin: RateLimitRefreshOrigin,
+@@ -1458,6 +1570,22 @@ mod tests {
+         AbsolutePathBuf::try_from(PathBuf::from(path)).expect("absolute test path")
+     }
+ 
++    // zeroconf-agent-discovery: the entry `/mcp connect` writes.
++    #[test]
++    fn a_discovered_server_is_configured_by_its_url() {
++        assert_eq!(
++            discovered_mcp_server_edit(
++                "venue-guide_local",
++                "http://venue-guide-mac.local:8127/mcp".to_string()
++            ),
++            ConfigEdit {
++                key_path: "mcp_servers.venue-guide_local".to_string(),
++                value: serde_json::json!({ "url": "http://venue-guide-mac.local:8127/mcp" }),
++                merge_strategy: MergeStrategy::Upsert,
++            }
++        );
++    }
++
+     #[test]
+     fn marketplace_add_source_for_request_resolves_relative_local_paths() {
+         let cwd = if cfg!(windows) {
+@@ -1614,6 +1742,7 @@ mod tests {
+                 runtime_status: None,
+                 plugin_id: None,
+                 extension_id: None,
++                extension_server_url: None,
+                 http_origin: None,
+                 server_info: None,
+                 tools: HashMap::from([(
+@@ -1641,6 +1770,7 @@ mod tests {
+                 runtime_status: None,
+                 plugin_id: None,
+                 extension_id: None,
++                extension_server_url: None,
+                 http_origin: None,
+                 server_info: None,
+                 tools: HashMap::new(),
+diff --git a/codex-rs/tui/src/app/event_dispatch.rs b/codex-rs/tui/src/app/event_dispatch.rs
+index ba6e3f8..a411db3 100644
+--- a/codex-rs/tui/src/app/event_dispatch.rs
++++ b/codex-rs/tui/src/app/event_dispatch.rs
+@@ -1,3 +1,5 @@
++// Modified by Cisco Systems, Inc. and its affiliates, 2026, for zeroconf-agent-discovery: https://github.com/cisco-open/zeroconf-agent-discovery
++
+ //! AppEvent dispatch for the TUI app.
+ //!
+ //! This module contains the exhaustive `AppEvent` dispatcher and exit-mode handling. Large domain
+@@ -1803,6 +1805,19 @@ impl App {
+             } => {
+                 self.handle_mcp_inventory_result(result, detail, thread_id);
+             }
++            // zeroconf-agent-discovery: the `/mcp connect` picker.
++            AppEvent::OpenMcpConnectPicker => {
++                self.fetch_mcp_connect_candidates(app_server);
++            }
++            AppEvent::McpConnectPickerLoaded { result } => {
++                self.handle_mcp_connect_candidates(result);
++            }
++            AppEvent::ConnectDiscoveredMcpServer { name, url } => {
++                self.connect_discovered_mcp_server(app_server, name, url);
++            }
++            AppEvent::DiscoveredMcpServerConnected { name, result } => {
++                self.handle_discovered_mcp_server_connected(name, result);
++            }
+             AppEvent::SkillsListLoaded { result, .. } => {
+                 self.handle_skills_list_result(
+                     result.map_err(|err| color_eyre::eyre::eyre!(err)),
+diff --git a/codex-rs/tui/src/app/tests.rs b/codex-rs/tui/src/app/tests.rs
+index e3a4fe5..911717e 100644
+--- a/codex-rs/tui/src/app/tests.rs
++++ b/codex-rs/tui/src/app/tests.rs
+@@ -518,6 +518,7 @@ async fn handle_mcp_inventory_result_respects_origin_thread() {
+             runtime_status: None,
+             plugin_id: None,
+             extension_id: None,
++            extension_server_url: None,
+             http_origin: None,
+             server_info: None,
+             tools: HashMap::new(),
+diff --git a/codex-rs/tui/src/app_event.rs b/codex-rs/tui/src/app_event.rs
+index 9c84885..5afbdce 100644
+--- a/codex-rs/tui/src/app_event.rs
++++ b/codex-rs/tui/src/app_event.rs
+@@ -1,3 +1,5 @@
++// Modified by Cisco Systems, Inc. and its affiliates, 2026, for zeroconf-agent-discovery: https://github.com/cisco-open/zeroconf-agent-discovery
++
+ //! Application-level events used to coordinate UI actions.
+ //!
+ //! `AppEvent` is the internal message bus between UI components and the top-level `App` loop.
+@@ -1161,6 +1163,29 @@ pub(crate) enum AppEvent {
+         thread_id: Option<ThreadId>,
+     },
+ 
++    // zeroconf-agent-discovery: the `/mcp connect` picker, for MCP servers
++    // discovered on the local network.
++    /// Fetch the MCP servers to offer in the `/mcp connect` picker.
++    OpenMcpConnectPicker,
++
++    /// Result of fetching the MCP servers for the `/mcp connect` picker.
++    McpConnectPickerLoaded {
++        result: Result<Vec<McpServerStatus>, String>,
++    },
++
++    /// Add a discovered MCP server to the configuration, then reload the MCP
++    /// servers, so that Codex connects to it.
++    ConnectDiscoveredMcpServer {
++        name: String,
++        url: String,
++    },
++
++    /// Result of adding a discovered MCP server to the configuration.
++    DiscoveredMcpServerConnected {
++        name: String,
++        result: Result<(), String>,
++    },
++
+     /// Result of the startup skills refresh that runs after the first frame is scheduled.
+     ///
+     /// This event is startup-only. Interactive skills refreshes are handled synchronously through the app
+diff --git a/codex-rs/tui/src/chatwidget.rs b/codex-rs/tui/src/chatwidget.rs
+index d2962e8..f12f8c7 100644
+--- a/codex-rs/tui/src/chatwidget.rs
++++ b/codex-rs/tui/src/chatwidget.rs
+@@ -1,3 +1,5 @@
++// Modified by Cisco Systems, Inc. and its affiliates, 2026, for zeroconf-agent-discovery: https://github.com/cisco-open/zeroconf-agent-discovery
++
+ //! The main Codex TUI chat surface.
+ //!
+ //! `ChatWidget` consumes protocol events, builds and updates history cells, and drives rendering
+@@ -293,6 +295,8 @@ mod questions;
+ mod startup_submission;
+ use self::interrupts::InterruptManager;
+ mod keymap_picker;
++// zeroconf-agent-discovery: the `/mcp connect` picker.
++mod mcp_connect;
+ mod mcp_startup;
+ use self::mcp_startup::McpStartupStatus;
+ mod misalignment_policy;
+diff --git a/codex-rs/tui/src/chatwidget/mcp_connect.rs b/codex-rs/tui/src/chatwidget/mcp_connect.rs
+new file mode 100644
+index 0000000..dc5a0ac
+--- /dev/null
++++ b/codex-rs/tui/src/chatwidget/mcp_connect.rs
+@@ -0,0 +1,64 @@
++// Copyright 2026 Cisco Systems, Inc. and its affiliates
++// SPDX-License-Identifier: Apache-2.0
++
++//! zeroconf-agent-discovery: the `/mcp connect` picker, which connects to an
++//! MCP server discovered on the local network.
++
++use super::*;
++use crate::history_cell::is_discovered;
++use codex_app_server_protocol::McpServerStatus;
++
++impl ChatWidget {
++    /// Offers the servers discovered on the local network, with their URLs.
++    /// Choosing one adds it to the configuration, and Codex connects to it.
++    pub(crate) fn open_mcp_connect_picker(&mut self, statuses: &[McpServerStatus]) {
++        let mut candidates: Vec<(String, String)> = statuses
++            .iter()
++            .filter(|status| is_discovered(status))
++            .filter_map(|status| {
++                let url = status.extension_server_url.clone()?;
++                Some((status.name.clone(), url))
++            })
++            .collect();
++        if candidates.is_empty() {
++            self.add_info_message(
++                "No MCP servers discovered on this network.".to_string(),
++                /*hint*/ None,
++            );
++            return;
++        }
++        candidates.sort();
++
++        let items = candidates
++            .into_iter()
++            .map(|(name, url)| {
++                let action: SelectionAction = {
++                    let (name, url) = (name.clone(), url.clone());
++                    Box::new(move |tx| {
++                        tx.send(AppEvent::ConnectDiscoveredMcpServer {
++                            name: name.clone(),
++                            url: url.clone(),
++                        });
++                    })
++                };
++                SelectionItem {
++                    name,
++                    description: Some(url),
++                    actions: vec![action],
++                    dismiss_on_select: true,
++                    ..Default::default()
++                }
++            })
++            .collect();
++        self.show_selection_view(SelectionViewParams {
++            title: Some("Connect to an MCP server on this network".to_string()),
++            subtitle: Some(
++                "Anyone on the network can announce a server; choosing one adds it to config.toml."
++                    .to_string(),
++            ),
++            footer_hint: Some(standard_popup_hint_line()),
++            items,
++            ..Default::default()
++        });
++    }
++}
+diff --git a/codex-rs/tui/src/chatwidget/slash_dispatch.rs b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
+index 44f3c87..6bfa1a8 100644
+--- a/codex-rs/tui/src/chatwidget/slash_dispatch.rs
++++ b/codex-rs/tui/src/chatwidget/slash_dispatch.rs
+@@ -1,3 +1,5 @@
++// Modified by Cisco Systems, Inc. and its affiliates, 2026, for zeroconf-agent-discovery: https://github.com/cisco-open/zeroconf-agent-discovery
++
+ //! Slash-command dispatch and local-recall handoff for `ChatWidget`.
+ //!
+ //! `ChatComposer` parses slash input and stages recognized command text for local
+@@ -865,6 +867,10 @@ impl ChatWidget {
+             SlashCommand::Mcp => {
+                 if trimmed.eq_ignore_ascii_case("verbose") {
+                     self.add_mcp_output(McpServerStatusDetail::Full);
++                } else if trimmed.eq_ignore_ascii_case("connect") {
++                    // zeroconf-agent-discovery: the picker for MCP servers
++                    // discovered on the local network.
++                    self.app_event_tx.send(AppEvent::OpenMcpConnectPicker);
+                 } else if let Some((command, name)) = trimmed.split_once(' ')
+                     && command.eq_ignore_ascii_case("login")
+                     && !name.trim().is_empty()
+@@ -880,7 +886,9 @@ impl ChatWidget {
+                         );
+                     }
+                 } else {
+-                    self.add_error_message("Usage: /mcp [verbose | login <name>]".to_string());
++                    self.add_error_message(
++                        "Usage: /mcp [verbose | login <name> | connect]".to_string(),
++                    );
+                 }
+             }
+             SlashCommand::Keymap => match trimmed.to_ascii_lowercase().as_str() {
+diff --git a/codex-rs/tui/src/chatwidget/tests.rs b/codex-rs/tui/src/chatwidget/tests.rs
+index 42f292b..69ce485 100644
+--- a/codex-rs/tui/src/chatwidget/tests.rs
++++ b/codex-rs/tui/src/chatwidget/tests.rs
+@@ -1,3 +1,5 @@
++// Modified by Cisco Systems, Inc. and its affiliates, 2026, for zeroconf-agent-discovery: https://github.com/cisco-open/zeroconf-agent-discovery
++
+ //! Exercises `ChatWidget` event handling and rendering invariants.
+ //!
+ //! These tests cover both app-server-native inputs and focused widget helpers. Many assertions are
+@@ -249,6 +251,7 @@ mod copy_export_picker_tests;
+ mod dynamic_activity_tests;
+ mod exec_flow;
+ mod goal_menu;
++// zeroconf-agent-discovery: the `/mcp connect` picker.
+ mod goal_validation;
+ mod guardian;
+ pub(crate) mod helpers;
+@@ -259,6 +262,7 @@ mod history_replay;
+ mod home_cleanup_tests;
+ #[path = "tests/luna_reserve_usage_tests.rs"]
+ mod luna_reserve_usage_tests;
++mod mcp_connect_tests;
+ mod mcp_startup;
+ #[path = "tests/misalignment_policy_tests.rs"]
+ mod misalignment_policy;
+diff --git a/codex-rs/tui/src/chatwidget/tests/mcp_connect_tests.rs b/codex-rs/tui/src/chatwidget/tests/mcp_connect_tests.rs
+new file mode 100644
+index 0000000..c8f78a9
+--- /dev/null
++++ b/codex-rs/tui/src/chatwidget/tests/mcp_connect_tests.rs
+@@ -0,0 +1,84 @@
++// Copyright 2026 Cisco Systems, Inc. and its affiliates
++// SPDX-License-Identifier: Apache-2.0
++
++//! zeroconf-agent-discovery: the `/mcp connect` picker.
++
++use super::*;
++use codex_app_server_protocol::McpAuthStatus;
++use codex_app_server_protocol::McpServerStatus;
++
++fn status(name: &str, extension_id: Option<&str>, url: Option<&str>) -> McpServerStatus {
++    McpServerStatus {
++        name: name.to_string(),
++        runtime_status: None,
++        plugin_id: None,
++        extension_id: extension_id.map(str::to_string),
++        extension_server_url: url.map(str::to_string),
++        http_origin: None,
++        server_info: None,
++        server_capabilities: None,
++        tool_list_meta: None,
++        tools: HashMap::new(),
++        tools_error: None,
++        resources: Vec::new(),
++        resource_templates: Vec::new(),
++        auth_status: McpAuthStatus::Unsupported,
++    }
++}
++
++#[tokio::test]
++async fn offers_only_discovered_servers_and_connects_to_the_chosen_one() {
++    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
++    let statuses = [
++        status("notes", None, None),
++        status(
++            "search",
++            Some("web_search"),
++            Some("https://search.example/mcp"),
++        ),
++        status(
++            "venue-guide_local",
++            Some("zeroconf_discovery"),
++            Some("http://venue-guide-mac.local:8127/mcp"),
++        ),
++        status(
++            "calendar_local",
++            Some("zeroconf_discovery"),
++            Some("https://room1.local:8443/mcp"),
++        ),
++    ];
++
++    chat.open_mcp_connect_picker(&statuses);
++
++    let popup = render_bottom_popup(&chat, /*width*/ 100);
++    assert!(popup.contains("Connect to an MCP server on this network"));
++    assert!(popup.contains("calendar_local"));
++    assert!(popup.contains("http://venue-guide-mac.local:8127/mcp"));
++    assert!(!popup.contains("notes"));
++    assert!(!popup.contains("search"));
++
++    // The list is in name order: the second entry is the venue guide.
++    chat.handle_key_event(KeyEvent::from(KeyCode::Down));
++    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
++
++    assert_matches!(
++        rx.try_recv(),
++        Ok(AppEvent::ConnectDiscoveredMcpServer { name, url })
++            if name == "venue-guide_local" && url == "http://venue-guide-mac.local:8127/mcp"
++    );
++    assert!(chat.no_modal_or_popup_active());
++}
++
++#[tokio::test]
++async fn says_so_when_nothing_was_discovered() {
++    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
++
++    chat.open_mcp_connect_picker(&[status("notes", None, None)]);
++
++    assert!(chat.no_modal_or_popup_active());
++    let rendered = drain_insert_history(&mut rx)
++        .iter()
++        .map(|lines| lines_to_single_string(lines))
++        .collect::<String>();
++    assert!(rendered.contains("No MCP servers discovered on this network."));
++}
+diff --git a/codex-rs/tui/src/chatwidget/tests/slash_commands.rs b/codex-rs/tui/src/chatwidget/tests/slash_commands.rs
+index dc5d14e..9f83bd4 100644
+--- a/codex-rs/tui/src/chatwidget/tests/slash_commands.rs
++++ b/codex-rs/tui/src/chatwidget/tests/slash_commands.rs
+@@ -1,3 +1,5 @@
++// Modified by Cisco Systems, Inc. and its affiliates, 2026, for zeroconf-agent-discovery: https://github.com/cisco-open/zeroconf-agent-discovery
++
+ use super::helpers::drain_insert_history_transcript;
+ use super::*;
+ use crate::bottom_pane::slash_commands::ServiceTierCommand;
+@@ -3033,6 +3035,19 @@ async fn slash_mcp_login_targets_the_active_thread() {
+     assert!(op_rx.try_recv().is_err(), "expected no core op to be sent");
+ }
+ 
++// zeroconf-agent-discovery: the picker for MCP servers discovered on the
++// local network.
++#[tokio::test]
++async fn slash_mcp_connect_opens_the_picker() {
++    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
++
++    submit_composer_text(&mut chat, "/mcp connect");
++
++    assert_matches!(rx.try_recv(), Ok(AppEvent::FollowTranscript));
++    assert_matches!(rx.try_recv(), Ok(AppEvent::OpenMcpConnectPicker));
++    assert!(op_rx.try_recv().is_err(), "expected no core op to be sent");
++}
++
+ #[tokio::test]
+ async fn slash_mcp_invalid_args_show_usage() {
+     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+@@ -3046,7 +3061,7 @@ async fn slash_mcp_invalid_args_show_usage() {
+         .collect::<Vec<_>>()
+         .join("\n");
+     assert!(
+-        rendered.contains("Usage: /mcp [verbose | login <name>]"),
++        rendered.contains("Usage: /mcp [verbose | login <name> | connect]"),
+         "expected usage message, got: {rendered:?}"
+     );
+     assert_eq!(recall_latest_after_clearing(&mut chat), "/mcp full");
+diff --git a/codex-rs/tui/src/history_cell/mcp.rs b/codex-rs/tui/src/history_cell/mcp.rs
+index cccb4c3..06a7b1f 100644
+--- a/codex-rs/tui/src/history_cell/mcp.rs
++++ b/codex-rs/tui/src/history_cell/mcp.rs
+@@ -641,9 +641,9 @@ const DISCOVERY_EXTENSION_ID: &str = "zeroconf_discovery";
+ /// zeroconf-agent-discovery: a server announced on the local network, which
+ /// the discovery extension contributes disabled. Codex has not connected to
+ /// it, so its tool count is unknown, not zero, and it is listed apart and
+-/// without one. Once the user adds it with `codex mcp add`, it comes from the
+-/// configuration instead and joins the normal list.
+-fn is_discovered(status: &McpServerStatus) -> bool {
++/// without one. Once the user adds it with `/mcp connect` or `codex mcp add`,
++/// it comes from the configuration instead and joins the normal list.
++pub(crate) fn is_discovered(status: &McpServerStatus) -> bool {
+     status.extension_id.as_deref() == Some(DISCOVERY_EXTENSION_ID)
+ }
+ 
+@@ -792,7 +792,8 @@ pub(crate) fn new_mcp_tools_output_from_statuses(
+     // zeroconf-agent-discovery: servers announced on the local network,
+     // which Codex lists but has not connected to, as a sub-list of the
+     // servers above.
+-    if !discovered.is_empty() {
++    let has_discovered = !discovered.is_empty();
++    if has_discovered {
+         if lines.last().is_some_and(|line| line.width() > 0) {
+             lines.push("".into());
+         }
+@@ -818,6 +819,14 @@ pub(crate) fn new_mcp_tools_output_from_statuses(
+ 
+     if matches!(detail, McpServerStatusDetail::ToolsAndAuthOnly) {
+         lines.push("".into());
++        // zeroconf-agent-discovery: the connect picker.
++        if has_discovered {
++            lines.push(
++                "  Use /mcp connect to connect to a discovered server."
++                    .dim()
++                    .into(),
++            );
++        }
+         lines.push("  Use /mcp verbose for tools and resources.".dim().into());
+     }
+ 
+diff --git a/codex-rs/tui/src/history_cell/mcp_tests.rs b/codex-rs/tui/src/history_cell/mcp_tests.rs
+index 7416b9d..03d9a33 100644
+--- a/codex-rs/tui/src/history_cell/mcp_tests.rs
++++ b/codex-rs/tui/src/history_cell/mcp_tests.rs
+@@ -32,6 +32,7 @@ fn mcp_inventory_connection_states() {
+         runtime_status,
+         plugin_id: None,
+         extension_id: None,
++        extension_server_url: None,
+         http_origin: None,
+         server_info: None,
+         tools: HashMap::new(),
+@@ -685,6 +686,7 @@ fn mcp_inventory_lists_discovered_servers_apart() {
+         runtime_status,
+         plugin_id: None,
+         extension_id: extension_id.map(str::to_string),
++        extension_server_url: None,
+         http_origin: http_origin.map(str::to_string),
+         server_info: None,
+         tools: HashMap::new(),
+@@ -734,6 +736,7 @@ fn mcp_inventory_lists_discovered_servers_apart() {
+             "  • ietf-127-venue-guide_local: not connected",
+             "      http://venue-guide-mac.local:8127",
+             "",
++            "  Use /mcp connect to connect to a discovered server.",
+             "  Use /mcp verbose for tools and resources.",
+         ]
+     );
+diff --git a/codex-rs/tui/src/history_cell/tests.rs b/codex-rs/tui/src/history_cell/tests.rs
+index 61d52b4..827cf5a 100644
+--- a/codex-rs/tui/src/history_cell/tests.rs
++++ b/codex-rs/tui/src/history_cell/tests.rs
+@@ -1149,6 +1149,7 @@ fn mcp_tools_output_from_statuses_renders_status_only_servers() {
+         runtime_status: None,
+         plugin_id: None,
+         extension_id: None,
++        extension_server_url: None,
+         http_origin: None,
+         server_info: None,
+         tools: HashMap::from([(
+@@ -1186,6 +1187,7 @@ fn mcp_tools_output_from_statuses_renders_verbose_inventory() {
+         runtime_status: None,
+         plugin_id: None,
+         extension_id: None,
++        extension_server_url: None,
+         http_origin: None,
+         server_info: None,
+         tools: HashMap::from([(

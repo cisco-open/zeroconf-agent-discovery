@@ -106,6 +106,13 @@ dns-sd -R notes _agents._tcp,_mcp local 8003 txtvers=1 proto=mcp path=/mcp
 `dns-sd`. When `config.toml` already has a server with the same name, Codex
 keeps that entry instead, and lists it with the configured servers.
 
+To connect to a discovered server, run `/mcp connect` and choose it from the
+list, which shows the URL of each. Codex adds it to `config.toml`, as
+`codex mcp add` would, and connects to it. From then on it is a configured
+server: `/mcp` lists it with the others, and it stays in `config.toml` after
+it leaves the network. Anyone on the network can announce a server, so
+connect only to those you trust.
+
 The URLs use `https`, as the draft requires. For test servers without TLS, set
 `CODEX_ZEROCONF_ALLOW_HTTP=1`, which uses `http` for hosts in `.local`. To run
 the binary without discovery, set `CODEX_ZEROCONF=0`. Both are read when Codex
@@ -130,9 +137,9 @@ point `CODEX_HOME` at another existing directory, and log in again there.
 On a shared screen, `/mcp` shows every MCP server in your configuration, and
 the session runs with your logins. A Codex home of its own keeps a demo apart:
 it starts with no MCP servers, no MCP credentials and no history, and a
-`codex mcp add` during the demo writes to its `config.toml` only. The apps and
-plugins of your ChatGPT account come with the account, not with the home, so
-the demo configuration turns them off:
+server added during the demo, with `/mcp connect` or `codex mcp add`, goes to
+its `config.toml` only. The apps and plugins of your ChatGPT account come with
+the account, not with the home, so the demo configuration turns them off:
 
 ```sh
 export CODEX_HOME="$HOME/codex-home-demo"

@@ -56,7 +56,7 @@ connected, so that Codex connects to none of them until the user asks it to.
 | Turn an MCP advertisement in the format of [draft -01][draft] into a Codex server entry: TXT checks, the URL from the SRV target, port and `path`, the name `<instance>_local` | Works, with unit tests                       |
 | Browse `_agents._tcp` on the local network                                                                                                                                     | Works on one host; across hosts untested     |
 | List the discovered servers in `/mcp`, apart and not connected                                                                                                                 | Works; they come and go in a running session |
-| Connect to a discovered server                                                                                                                                                 | Works, with `codex mcp add`                  |
+| Connect to a discovered server                                                                                                                                                 | Works: `/mcp connect` or `codex mcp add`     |
 
 Build and run instructions are in [codex/README.md](codex/README.md).
 

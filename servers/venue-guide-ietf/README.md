@@ -78,7 +78,8 @@ dns-sd -B _agents._tcp,_mcp
 The guide serves plain HTTP, while the draft specifies `https`, so a client
 has to allow `http` for `.local` hosts. With the patched Codex CLI in
 [`codex/`](../../codex/), set `CODEX_ZEROCONF_ALLOW_HTTP=1`. `/mcp` then lists
-the guide as `ietf-127-venue-guide_local`; connect to it with:
+the guide as `ietf-127-venue-guide_local`; `/mcp connect` connects to it.
+Outside the TUI, add it with:
 
 ```sh
 codex mcp add ietf-127-venue-guide_local --url http://venue-guide-<host>.local:8127/mcp
