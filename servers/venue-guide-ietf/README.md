@@ -55,8 +55,9 @@ target/release/venue-guide-ietf --meeting 127
 startup, the guide fetches the agenda and caches it in
 `~/.cache/venue-guide-ietf/`. When the network is down, it uses the cached
 copy; `--offline` skips the fetch. It serves MCP over Streamable HTTP on port
-8127, at `/mcp`; `--help` lists the options. On Ctrl-C, SIGTERM or SIGHUP, it
-withdraws its announcement before it exits, so browsers drop it at once.
+8127, at `/mcp`, over IPv6 and IPv4; `--help` lists the options. On Ctrl-C,
+SIGTERM or SIGHUP, it withdraws its announcement before it exits, so browsers
+drop it at once.
 
 ## Discovery
 
@@ -69,7 +70,11 @@ txtvers=1 proto=mcp path=/mcp proto-ver=2026-07-28 title=Unofficial IETF 127 ven
 
 The SRV record points to a hostname of its own, `venue-guide-<host>.local`,
 not to the hostname of the machine, which belongs to the system's mDNS
-responder. To browse for it on macOS:
+responder. The guide announces itself on every interface but loopback, which
+no other host can reach; so without a network, not even a client on the same
+machine finds it. It also leaves out the IPv4 address of a CLAT (464XLAT), in
+`192.0.0.0/29`: every host on an IPv6-only network may have the same one. To
+browse for it on macOS:
 
 ```sh
 dns-sd -B _agents._tcp,_mcp

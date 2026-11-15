@@ -45,8 +45,10 @@ struct Args {
     #[arg(long, default_value_t = 127)]
     meeting: u32,
 
-    /// Address to serve MCP on, over Streamable HTTP at /mcp.
-    #[arg(long, default_value = "0.0.0.0:8127")]
+    /// Address to serve MCP on, over Streamable HTTP at /mcp. The default,
+    /// `[::]`, takes IPv4 too where sockets are dual-stack, as on macOS and
+    /// Linux; on an IPv6-only network, IPv6 is all that other hosts can use.
+    #[arg(long, default_value = "[::]:8127")]
     listen: SocketAddr,
 
     /// Use the cached agenda; do not fetch it from the IETF Datatracker.

@@ -1849,6 +1849,7 @@ dependencies = [
  "chrono-tz",
  "clap",
  "gethostname",
+ "if-addrs",
  "mdns-sd",
  "pretty_assertions",
  "reqwest",
