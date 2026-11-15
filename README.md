@@ -46,17 +46,17 @@ Codex CLI is built locally, from upstream source.
 ### Codex CLI status
 
 The goal for the hackathon: MCP servers announced on the local network show up
-in the `/mcp` list of Codex CLI as disabled entries, so that Codex connects to
-none of them until the user asks it to.
+in the `/mcp` list of Codex CLI, under a heading of their own and not
+connected, so that Codex connects to none of them until the user asks it to.
 
-| Capability                                                                                                                                                                     | Status                                                                                        |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
-| Build the patched CLI from the pinned upstream release, with `codex/build.sh`                                                                                                  | Works on macOS; untested on Linux                                                             |
-| Run the discovery code inside the Codex app-server                                                                                                                             | Works                                                                                         |
-| Turn an MCP advertisement in the format of [draft -01][draft] into a Codex server entry: TXT checks, the URL from the SRV target, port and `path`, the name `<instance>_local` | Works, with unit tests                                                                        |
-| Browse `_agents._tcp` on the local network                                                                                                                                     | Works on one host; across hosts untested                                                      |
-| List the discovered servers in `/mcp`, disabled                                                                                                                                | Works; they come and go in a running session, and those found after startup show as `unknown` |
-| Connect to a discovered server                                                                                                                                                 | Works, with `codex mcp add`                                                                   |
+| Capability                                                                                                                                                                     | Status                                       |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------- |
+| Build the patched CLI from the pinned upstream release, with `codex/build.sh`                                                                                                  | Works on macOS; untested on Linux            |
+| Run the discovery code inside the Codex app-server                                                                                                                             | Works                                        |
+| Turn an MCP advertisement in the format of [draft -01][draft] into a Codex server entry: TXT checks, the URL from the SRV target, port and `path`, the name `<instance>_local` | Works, with unit tests                       |
+| Browse `_agents._tcp` on the local network                                                                                                                                     | Works on one host; across hosts untested     |
+| List the discovered servers in `/mcp`, apart and not connected                                                                                                                 | Works; they come and go in a running session |
+| Connect to a discovered server                                                                                                                                                 | Works, with `codex mcp add`                  |
 
 Build and run instructions are in [codex/README.md](codex/README.md).
 

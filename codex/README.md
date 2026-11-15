@@ -94,18 +94,17 @@ run `codex mcp login <name>` with this binary. To use the keyring anyway, set
 `mcp_oauth_credentials_store = "keyring"`.
 
 Servers announced on the local network appear in `/mcp` as `<instance>_local`,
-and `/mcp verbose` shows them as disabled: Codex connects to none of them on
-its own. To try it, announce one from another terminal, on macOS:
+under "Discovered on this network", as not connected and with the address
+they announce: Codex connects to none of them on its own. To try it, announce
+one from another terminal, on macOS:
 
 ```sh
 dns-sd -R notes _agents._tcp,_mcp local 8003 txtvers=1 proto=mcp path=/mcp
 ```
 
 `notes_local` shows up in `/mcp` within a few seconds, and is gone once you stop
-`dns-sd`. A server found after Codex started shows as `unknown (0 tools)`
-instead of `disabled (0 tools)`: Codex has no connection status for it yet,
-and still does not connect to it. When `config.toml` already has a server with
-the same name, Codex keeps that entry instead.
+`dns-sd`. When `config.toml` already has a server with the same name, Codex
+keeps that entry instead, and lists it with the configured servers.
 
 The URLs use `https`, as the draft requires. For test servers without TLS, set
 `CODEX_ZEROCONF_ALLOW_HTTP=1`, which uses `http` for hosts in `.local`. To run

@@ -1,0 +1,358 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Lori Jakab <lojakab@cisco.com>
+Date: Sat, 14 Nov 2026 16:56:32 -0800
+Subject: [PATCH] Group discovered MCP servers in /mcp, without a tool count
+Organization: Cisco Systems, Inc.
+
+Copyright 2026 Cisco Systems, Inc. and its affiliates
+SPDX-License-Identifier: Apache-2.0
+
+Signed-off-by: Lori Jakab <lojakab@cisco.com>
+---
+ .../src/protocol/v2/mcp.rs                    |  8 ++
+ .../src/protocol/v2/tests.rs                  |  7 ++
+ .../src/request_processors/mcp_processor.rs   | 13 ++++
+ codex-rs/tui/src/app/background_requests.rs   |  4 +
+ codex-rs/tui/src/app/tests.rs                 |  3 +
+ codex-rs/tui/src/history_cell/mcp.rs          | 45 ++++++++++++
+ codex-rs/tui/src/history_cell/mcp_tests.rs    | 73 +++++++++++++++++++
+ codex-rs/tui/src/history_cell/tests.rs        |  4 +
+ 8 files changed, 157 insertions(+)
+
+diff --git a/codex-rs/app-server-protocol/src/protocol/v2/mcp.rs b/codex-rs/app-server-protocol/src/protocol/v2/mcp.rs
+index 824d770..5351dc3 100644
+--- a/codex-rs/app-server-protocol/src/protocol/v2/mcp.rs
++++ b/codex-rs/app-server-protocol/src/protocol/v2/mcp.rs
+@@ -1,3 +1,5 @@
++// Modified by Cisco Systems, Inc. and its affiliates, 2026, for zeroconf-agent-discovery: https://github.com/cisco-open/zeroconf-agent-discovery
++
+ use super::shared::v2_enum_from_core;
+ use crate::JsonSchema;
+ use crate::TS;
+@@ -81,6 +83,12 @@ pub struct McpServerStatus {
+     /// Current thread-runtime connection state; null when unavailable or the configuration changed.
+     pub runtime_status: Option<McpServerConnectionStatus>,
+     pub plugin_id: Option<String>,
++    // zeroconf-agent-discovery: lets clients tell servers that an extension
++    // contributed, such as those discovered on the local network, from
++    // configured ones.
++    /// ID of the extension that contributed the server, such as
++    /// `zeroconf_discovery`; null for servers from any other source.
++    pub extension_id: Option<String>,
+     /// HTTP origin of the effective configured endpoint, including plugin servers.
+     /// Excludes credentials, path, query, and fragment; null for non-HTTP transports.
+     pub http_origin: Option<String>,
+diff --git a/codex-rs/app-server-protocol/src/protocol/v2/tests.rs b/codex-rs/app-server-protocol/src/protocol/v2/tests.rs
+index 049cef5..d7f35c1 100644
+--- a/codex-rs/app-server-protocol/src/protocol/v2/tests.rs
++++ b/codex-rs/app-server-protocol/src/protocol/v2/tests.rs
+@@ -1,3 +1,5 @@
++// Modified by Cisco Systems, Inc. and its affiliates, 2026, for zeroconf-agent-discovery: https://github.com/cisco-open/zeroconf-agent-discovery
++
+ use super::*;
+ use crate::ServerNotification;
+ use codex_protocol::approvals::ElicitationRequest as CoreElicitationRequest;
+@@ -2694,6 +2696,7 @@ fn mcp_server_status_serializes_absent_server_info_as_null() {
+             name: "not-ready".to_string(),
+             runtime_status: None,
+             plugin_id: None,
++            extension_id: None,
+             http_origin: None,
+             server_info: None,
+             tools: HashMap::new(),
+@@ -2711,6 +2714,7 @@ fn mcp_server_status_serializes_absent_server_info_as_null() {
+                 "name": "not-ready",
+                 "runtimeStatus": null,
+                 "pluginId": null,
++                "extensionId": null,
+                 "httpOrigin": null,
+                 "serverInfo": null,
+                 "serverCapabilities": null,
+@@ -2747,6 +2751,7 @@ fn mcp_server_status_accepts_older_inventory_without_runtime_status() {
+             name: "older-server".to_string(),
+             runtime_status: None,
+             plugin_id: None,
++            extension_id: None,
+             http_origin: None,
+             server_info: None,
+             tools: HashMap::new(),
+@@ -2822,6 +2827,7 @@ fn mcp_server_status_serializes_absent_server_info_metadata_as_null() {
+             name: "initialized".to_string(),
+             runtime_status: None,
+             plugin_id: Some("lookup@test".to_string()),
++            extension_id: None,
+             http_origin: None,
+             server_info: Some(McpServerInfo {
+                 name: "lookup-server".to_string(),
+@@ -2846,6 +2852,7 @@ fn mcp_server_status_serializes_absent_server_info_metadata_as_null() {
+                 "name": "initialized",
+                 "runtimeStatus": null,
+                 "pluginId": "lookup@test",
++                "extensionId": null,
+                 "httpOrigin": null,
+                 "serverCapabilities": null,
+                 "toolListMeta": null,
+diff --git a/codex-rs/app-server/src/request_processors/mcp_processor.rs b/codex-rs/app-server/src/request_processors/mcp_processor.rs
+index 7bee469..0e2caa7 100644
+--- a/codex-rs/app-server/src/request_processors/mcp_processor.rs
++++ b/codex-rs/app-server/src/request_processors/mcp_processor.rs
+@@ -1,3 +1,5 @@
++// Modified by Cisco Systems, Inc. and its affiliates, 2026, for zeroconf-agent-discovery: https://github.com/cisco-open/zeroconf-agent-discovery
++
+ use super::account_processor::EnterpriseLoginCompletion;
+ use super::account_processor::EnterpriseLoginTarget;
+ use super::thread_input::ensure_direct_input_allowed;
+@@ -569,6 +571,17 @@ impl McpRequestProcessor {
+                         | McpServerSource::Extension { .. } => None,
+                     },
+                 ),
++                // zeroconf-agent-discovery: the contributing extension.
++                extension_id: mcp_config
++                    .mcp_server_catalog
++                    .server(name)
++                    .and_then(|server| match server.source() {
++                        McpServerSource::Extension { id, .. } => Some(id.clone()),
++                        McpServerSource::Plugin(_)
++                        | McpServerSource::SelectedPlugin(_)
++                        | McpServerSource::Config
++                        | McpServerSource::Compatibility { .. } => None,
++                    }),
+                 http_origin: mcp_config
+                     .mcp_server_catalog
+                     .server(name)
+diff --git a/codex-rs/tui/src/app/background_requests.rs b/codex-rs/tui/src/app/background_requests.rs
+index 999931d..5f06ebe 100644
+--- a/codex-rs/tui/src/app/background_requests.rs
++++ b/codex-rs/tui/src/app/background_requests.rs
+@@ -1,3 +1,5 @@
++// Modified by Cisco Systems, Inc. and its affiliates, 2026, for zeroconf-agent-discovery: https://github.com/cisco-open/zeroconf-agent-discovery
++
+ //! Background app-server requests launched by the TUI app.
+ //!
+ //! This module owns fire-and-forget fetch/write helpers for MCP inventory, skills, plugins, rate
+@@ -1611,6 +1613,7 @@ mod tests {
+                 name: "docs".to_string(),
+                 runtime_status: None,
+                 plugin_id: None,
++                extension_id: None,
+                 http_origin: None,
+                 server_info: None,
+                 tools: HashMap::from([(
+@@ -1637,6 +1640,7 @@ mod tests {
+                 name: "disabled".to_string(),
+                 runtime_status: None,
+                 plugin_id: None,
++                extension_id: None,
+                 http_origin: None,
+                 server_info: None,
+                 tools: HashMap::new(),
+diff --git a/codex-rs/tui/src/app/tests.rs b/codex-rs/tui/src/app/tests.rs
+index f8d8f9a..e3a4fe5 100644
+--- a/codex-rs/tui/src/app/tests.rs
++++ b/codex-rs/tui/src/app/tests.rs
+@@ -1,3 +1,5 @@
++// Modified by Cisco Systems, Inc. and its affiliates, 2026, for zeroconf-agent-discovery: https://github.com/cisco-open/zeroconf-agent-discovery
++
+ //! App-level orchestration tests for the TUI.
+ 
+ #[path = "tests/terminal_size_telemetry_tests.rs"]
+@@ -515,6 +517,7 @@ async fn handle_mcp_inventory_result_respects_origin_thread() {
+             name: "docs".to_string(),
+             runtime_status: None,
+             plugin_id: None,
++            extension_id: None,
+             http_origin: None,
+             server_info: None,
+             tools: HashMap::new(),
+diff --git a/codex-rs/tui/src/history_cell/mcp.rs b/codex-rs/tui/src/history_cell/mcp.rs
+index 9f80e5e..cccb4c3 100644
+--- a/codex-rs/tui/src/history_cell/mcp.rs
++++ b/codex-rs/tui/src/history_cell/mcp.rs
+@@ -1,3 +1,5 @@
++// Modified by Cisco Systems, Inc. and its affiliates, 2026, for zeroconf-agent-discovery: https://github.com/cisco-open/zeroconf-agent-discovery
++
+ //! MCP tool-call, inventory, and output history cells.
+ //! Tool output previews share a three-row budget across all result blocks;
+ //! the expanded transcript retains the full text.
+@@ -632,6 +634,19 @@ pub(crate) fn new_mcp_tools_output(
+     PlainHistoryCell { lines }
+ }
+ 
++/// zeroconf-agent-discovery: the ID of the discovery extension's MCP server
++/// contributor (`ZeroconfDiscovery::id` in `ext/zeroconf-discovery`).
++const DISCOVERY_EXTENSION_ID: &str = "zeroconf_discovery";
++
++/// zeroconf-agent-discovery: a server announced on the local network, which
++/// the discovery extension contributes disabled. Codex has not connected to
++/// it, so its tool count is unknown, not zero, and it is listed apart and
++/// without one. Once the user adds it with `codex mcp add`, it comes from the
++/// configuration instead and joins the normal list.
++fn is_discovered(status: &McpServerStatus) -> bool {
++    status.extension_id.as_deref() == Some(DISCOVERY_EXTENSION_ID)
++}
++
+ /// Build the `/mcp` history cell from app-server `McpServerStatus` responses.
+ ///
+ /// The server list comes directly from the app-server status response, sorted
+@@ -653,6 +668,9 @@ pub(crate) fn new_mcp_tools_output_from_statuses(
+ 
+     let mut statuses = statuses.iter().collect::<Vec<_>>();
+     statuses.sort_by(|a, b| a.name.cmp(&b.name));
++    let (discovered, statuses): (Vec<_>, Vec<_>) = statuses
++        .into_iter()
++        .partition(|status| is_discovered(status));
+ 
+     let has_any_tools = statuses.iter().any(|status| !status.tools.is_empty());
+     if !has_any_tools && matches!(detail, McpServerStatusDetail::Full) {
+@@ -771,6 +789,33 @@ pub(crate) fn new_mcp_tools_output_from_statuses(
+         lines.push(Line::from(""));
+     }
+ 
++    // zeroconf-agent-discovery: servers announced on the local network,
++    // which Codex lists but has not connected to, as a sub-list of the
++    // servers above.
++    if !discovered.is_empty() {
++        if lines.last().is_some_and(|line| line.width() > 0) {
++            lines.push("".into());
++        }
++        lines.push("  Discovered on this network:".bold().into());
++        for status in discovered {
++            lines.push(
++                vec![
++                    "  • ".dim(),
++                    status.name.clone().bold(),
++                    ": ".into(),
++                    "not connected".dim(),
++                ]
++                .into(),
++            );
++            if let Some(origin) = &status.http_origin {
++                lines.push(format!("      {origin}").dim().into());
++            }
++        }
++        if matches!(detail, McpServerStatusDetail::Full) {
++            lines.push("".into());
++        }
++    }
++
+     if matches!(detail, McpServerStatusDetail::ToolsAndAuthOnly) {
+         lines.push("".into());
+         lines.push("  Use /mcp verbose for tools and resources.".dim().into());
+diff --git a/codex-rs/tui/src/history_cell/mcp_tests.rs b/codex-rs/tui/src/history_cell/mcp_tests.rs
+index 97d1a5b..7416b9d 100644
+--- a/codex-rs/tui/src/history_cell/mcp_tests.rs
++++ b/codex-rs/tui/src/history_cell/mcp_tests.rs
+@@ -1,3 +1,5 @@
++// Modified by Cisco Systems, Inc. and its affiliates, 2026, for zeroconf-agent-discovery: https://github.com/cisco-open/zeroconf-agent-discovery
++
+ use super::*;
+ use base64::Engine;
+ use codex_protocol::mcp::CallToolResult;
+@@ -29,6 +31,7 @@ fn mcp_inventory_connection_states() {
+         name: name.to_string(),
+         runtime_status,
+         plugin_id: None,
++        extension_id: None,
+         http_origin: None,
+         server_info: None,
+         tools: HashMap::new(),
+@@ -665,3 +668,73 @@ fn mcp_result_preview_preserves_source_text_and_excludes_tree_gutters() {
+         );
+     }
+ }
++
++/// zeroconf-agent-discovery: servers that the discovery extension contributed
++/// are listed apart, without a tool count; their names don't matter.
++#[test]
++fn mcp_inventory_lists_discovered_servers_apart() {
++    use McpServerConnectionStatus as Status;
++
++    let status = |name: &str,
++                  runtime_status: Option<Status>,
++                  extension_id: Option<&str>,
++                  http_origin: Option<&str>| McpServerStatus {
++        server_capabilities: None,
++        tool_list_meta: None,
++        name: name.to_string(),
++        runtime_status,
++        plugin_id: None,
++        extension_id: extension_id.map(str::to_string),
++        http_origin: http_origin.map(str::to_string),
++        server_info: None,
++        tools: HashMap::new(),
++        tools_error: None,
++        resources: Vec::new(),
++        resource_templates: Vec::new(),
++        auth_status: McpAuthStatus::Unsupported,
++    };
++    let statuses = [
++        status("notes", Some(Status::Connected), None, None),
++        status(
++            "ietf-127-venue-guide_local",
++            None,
++            Some("zeroconf_discovery"),
++            Some("http://venue-guide-mac.local:8127"),
++        ),
++        status(
++            "calendar_local",
++            Some(Status::Disabled),
++            Some("zeroconf_discovery"),
++            None,
++        ),
++        // Configured, or from another extension: the normal list, whatever
++        // the name.
++        status("failing_local", Some(Status::Failed), None, None),
++        status("search", Some(Status::Connected), Some("web_search"), None),
++    ];
++    let rendered =
++        new_mcp_tools_output_from_statuses(&statuses, McpServerStatusDetail::ToolsAndAuthOnly)
++            .display_lines(/*width*/ 100)
++            .iter()
++            .map(ToString::to_string)
++            .collect::<Vec<_>>();
++    assert_eq!(
++        rendered,
++        vec![
++            "/mcp",
++            "",
++            "🔌  MCP Tools",
++            "",
++            "  • failing_local: failed (0 tools)",
++            "  • notes: connected (0 tools)",
++            "  • search: connected (0 tools)",
++            "",
++            "  Discovered on this network:",
++            "  • calendar_local: not connected",
++            "  • ietf-127-venue-guide_local: not connected",
++            "      http://venue-guide-mac.local:8127",
++            "",
++            "  Use /mcp verbose for tools and resources.",
++        ]
++    );
++}
+diff --git a/codex-rs/tui/src/history_cell/tests.rs b/codex-rs/tui/src/history_cell/tests.rs
+index d0e70b0..61d52b4 100644
+--- a/codex-rs/tui/src/history_cell/tests.rs
++++ b/codex-rs/tui/src/history_cell/tests.rs
+@@ -1,3 +1,5 @@
++// Modified by Cisco Systems, Inc. and its affiliates, 2026, for zeroconf-agent-discovery: https://github.com/cisco-open/zeroconf-agent-discovery
++
+ //! Coverage for history-cell rendering, wrapping, and transcript behavior.
+ 
+ use super::*;
+@@ -1146,6 +1148,7 @@ fn mcp_tools_output_from_statuses_renders_status_only_servers() {
+         name: "plugin_docs".to_string(),
+         runtime_status: None,
+         plugin_id: None,
++        extension_id: None,
+         http_origin: None,
+         server_info: None,
+         tools: HashMap::from([(
+@@ -1182,6 +1185,7 @@ fn mcp_tools_output_from_statuses_renders_verbose_inventory() {
+         name: "plugin_docs".to_string(),
+         runtime_status: None,
+         plugin_id: None,
++        extension_id: None,
+         http_origin: None,
+         server_info: None,
+         tools: HashMap::from([(
