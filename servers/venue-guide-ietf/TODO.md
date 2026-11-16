@@ -188,7 +188,8 @@ super-linter's Rust checks are off (see the comment in
 
 - Design: a workflow that runs `cargo fmt --check`,
   `cargo clippy --all-targets -- -D warnings` and `cargo test` in
-  `servers/venue-guide-ietf/`, on pushes and pull requests that touch it.
+  `servers/venue-guide-ietf/`, on pushes and pull requests that touch it,
+  and again with `--features mdnsresponder` on a macOS runner.
   `rust-toolchain.toml` selects the toolchain on GitHub's runners. Follow
   `lint.yml`: actions pinned by commit, `permissions: contents: read`. A
   token that pushes workflow files needs the `workflow` scope.
@@ -198,3 +199,5 @@ super-linter's Rust checks are off (see the comment in
 - Discovery between two machines is untested; so far the guide and its
   clients have run on one Mac.
 - Linux is untested, both building and announcing next to Avahi.
+- The mDNSResponder build has been discovered by the Codex build on
+  mDNSResponder, but not yet by the one on `mdns-sd`.

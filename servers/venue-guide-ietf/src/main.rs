@@ -39,7 +39,7 @@ const PROTO_VER: &str = "2026-07-28";
 const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Parser)]
-#[command(version, about)]
+#[command(version = announce::VERSION, about)]
 struct Args {
     /// IETF meeting number.
     #[arg(long, default_value_t = 127)]
@@ -92,10 +92,40 @@ async fn main() -> anyhow::Result<()> {
         agenda.slot_count()
     );
 
-    let host_name = announce::srv_host_name(&gethostname::gethostname().to_string_lossy());
+    let listener = tokio::net::TcpListener::bind(args.listen)
+        .await
+        .with_context(|| format!("cannot listen on {}", args.listen))?;
+    let port = listener.local_addr()?.port();
+    tracing::info!("serving MCP at http://{}{MCP_PATH}", listener.local_addr()?);
+
+    // Announced before the service is built, since the host name it is
+    // announced under, which the service must accept, is known only then.
+    let announcement = if args.no_announce {
+        None
+    } else {
+        let instance = args
+            .instance
+            .clone()
+            .unwrap_or_else(|| format!("IETF {} venue guide", args.meeting));
+        let title = format!("Unofficial IETF {} venue guide", args.meeting);
+        let txt = announce::txt_record(MCP_PATH, PROTO_VER, &title);
+        let announcement = Announcement::start(&instance, port, &txt).await?;
+        // Backticks set the name off from the sentence, since its instance
+        // label may contain spaces; inside them, it is the exact DNS name.
+        tracing::info!(
+            "announced `{}` as http://{}:{port}{MCP_PATH}, with {}",
+            announcement.fullname(),
+            announcement.host_name().trim_end_matches('.'),
+            announce::NAME
+        );
+        Some(announcement)
+    };
+
     let stop = CancellationToken::new();
     let config = StreamableHttpServerConfig::default()
-        .with_allowed_hosts(allowed_hosts(&host_name))
+        .with_allowed_hosts(allowed_hosts(
+            announcement.as_ref().map(Announcement::host_name),
+        ))
         .with_cancellation_token(stop.child_token());
     let service: StreamableHttpService<Guide, LocalSessionManager> = StreamableHttpService::new(
         {
@@ -106,31 +136,6 @@ async fn main() -> anyhow::Result<()> {
         config,
     );
     let router = axum::Router::new().nest_service(MCP_PATH, service);
-    let listener = tokio::net::TcpListener::bind(args.listen)
-        .await
-        .with_context(|| format!("cannot listen on {}", args.listen))?;
-    let port = listener.local_addr()?.port();
-    tracing::info!("serving MCP at http://{}{MCP_PATH}", listener.local_addr()?);
-
-    let announcement = if args.no_announce {
-        None
-    } else {
-        let instance = args
-            .instance
-            .clone()
-            .unwrap_or_else(|| format!("IETF {} venue guide", args.meeting));
-        let title = format!("Unofficial IETF {} venue guide", args.meeting);
-        let txt = announce::txt_record(MCP_PATH, PROTO_VER, &title);
-        let announcement = Announcement::start(&instance, &host_name, port, &txt)?;
-        // Backticks set the name off from the sentence, since its instance
-        // label may contain spaces; inside them, it is the exact DNS name.
-        tracing::info!(
-            "announced `{}` as http://{}:{port}{MCP_PATH}",
-            announcement.fullname(),
-            host_name.trim_end_matches('.')
-        );
-        Some(announcement)
-    };
 
     let server =
         axum::serve(listener, router).with_graceful_shutdown(stop.clone().cancelled_owned());
@@ -172,15 +177,17 @@ async fn shutdown_signal() -> std::io::Result<()> {
     }
 }
 
-/// The `Host` headers to accept: loopback, and the name the guide announces.
-/// rmcp rejects any other, against DNS rebinding.
-fn allowed_hosts(host_name: &str) -> Vec<String> {
-    vec![
+/// The `Host` headers to accept: loopback, and the host name the guide is
+/// announced under, if it is. rmcp rejects any other, against DNS rebinding,
+/// and ignores case, so the Mac's `LOJAKAB-M-Y2NH.local` matches too.
+fn allowed_hosts(host_name: Option<&str>) -> Vec<String> {
+    let mut hosts = vec![
         "localhost".to_string(),
         "127.0.0.1".to_string(),
         "::1".to_string(),
-        host_name.trim_end_matches('.').to_string(),
-    ]
+    ];
+    hosts.extend(host_name.map(|name| name.trim_end_matches('.').to_string()));
+    hosts
 }
 
 /// The agenda from the Datatracker, cached for when the network is down; or
@@ -263,8 +270,9 @@ mod tests {
     #[test]
     fn accepts_the_announced_host_name() {
         assert_eq!(
-            allowed_hosts("venue-guide-mac.local."),
+            allowed_hosts(Some("venue-guide-mac.local.")),
             vec!["localhost", "127.0.0.1", "::1", "venue-guide-mac.local"]
         );
+        assert_eq!(allowed_hosts(None), vec!["localhost", "127.0.0.1", "::1"]);
     }
 }

@@ -28,6 +28,16 @@ tokio-util = "0.7.18"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 
+# The mDNSResponder backend, which the mdnsresponder feature selects.
+[target.'cfg(target_os = "macos")'.dependencies]
+async-dnssd = { version = "0.5.1", optional = true }
+futures-util = { version = "0.3.34", optional = true, default-features = false }
+
+[features]
+# Announces through mDNSResponder, the system's responder, with its dns_sd
+# API, instead of with mdns-sd, a responder of the guide's own: macOS only.
+mdnsresponder = ["dep:async-dnssd", "dep:futures-util", "tokio/time"]
+
 [dev-dependencies]
 pretty_assertions = "1.4.1"
 

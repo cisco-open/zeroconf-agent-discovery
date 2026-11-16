@@ -36,6 +36,12 @@ cargo build --release
 The result is a single binary, `target/release/venue-guide-ietf`, which can
 be copied to another machine of the same platform.
 
+On macOS, `cargo build --release --features mdnsresponder` builds a guide
+that announces itself through mDNSResponder, the system's own responder,
+instead of with a responder of its own; see [Discovery](#discovery).
+Its `--version` names the backend, as in `venue-guide-ietf 0.1.0
+(mDNSResponder)`.
+
 rustup from Homebrew does not put `cargo` on `PATH`, so a shell finds no
 `cargo` until its proxies are added:
 
@@ -68,13 +74,19 @@ its `_mcp` subtype, with this TXT record, `txtvers` first:
 txtvers=1 proto=mcp path=/mcp proto-ver=2026-07-28 title=Unofficial IETF 127 venue guide
 ```
 
-The SRV record points to a hostname of its own, `venue-guide-<host>.local`,
+By default, the guide answers for itself with `mdns-sd`, a responder of its
+own. Its SRV record points to a hostname of its own, `venue-guide-<host>.local`,
 not to the hostname of the machine, which belongs to the system's mDNS
-responder. The guide announces itself on every interface but loopback, which
-no other host can reach; so without a network, not even a client on the same
-machine finds it. It also leaves out the IPv4 address of a CLAT (464XLAT), in
-`192.0.0.0/29`: every host on an IPv6-only network may have the same one. To
-browse for it on macOS:
+responder. It announces itself on every interface but loopback, which no other
+host can reach; so without a network, not even a client on the same machine
+finds it. It also leaves out the IPv4 address of a CLAT (464XLAT), in
+`192.0.0.0/29`: every host on an IPv6-only network may have the same one.
+
+Built with `--features mdnsresponder`, the guide registers with mDNSResponder,
+which answers for it instead. The SRV record then points to the hostname of
+the machine, whose addresses mDNSResponder announces, and mDNSResponder
+withdraws the announcement when the guide exits, even when it is killed. The
+log names the backend of either build. To browse for the guide on macOS:
 
 ```sh
 dns-sd -B _agents._tcp,_mcp
@@ -84,7 +96,7 @@ The guide serves plain HTTP, while the draft specifies `https`, so a client
 has to allow `http` for `.local` hosts. With the patched Codex CLI in
 [`codex/`](../../codex/), set `CODEX_ZEROCONF_ALLOW_HTTP=1`. `/mcp` then lists
 the guide as `ietf-127-venue-guide_local`; `/mcp connect` connects to it.
-Outside the TUI, add it with:
+Outside the TUI, add it with the URL from the guide's log, such as:
 
 ```sh
 codex mcp add ietf-127-venue-guide_local --url http://venue-guide-<host>.local:8127/mcp
