@@ -14,15 +14,23 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 
-//! The mDNS browser, which keeps the registry current.
+//! The browser, which keeps the registry current. A backend does the
+//! browsing on a thread of its own and reports each change as an [`Event`];
+//! the mapping, the registry and the naming are the same whichever backend
+//! reports, so both builds list the same servers under the same names.
+//!
+//! The backend is chosen at build time (see `build.rs`): `mdns-sd` by
+//! default, an mDNS stack of its own, or `mdnsresponder` on macOS, which asks
+//! the system's mDNSResponder through its `dns_sd` API.
+
+#[cfg(not(zeroconf_backend = "mdnsresponder"))]
+mod mdns_sd;
+#[cfg(zeroconf_backend = "mdnsresponder")]
+mod mdnsresponder;
 
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::PoisonError;
-
-use mdns_sd::ResolvedService;
-use mdns_sd::ServiceDaemon;
-use mdns_sd::ServiceEvent;
 
 use crate::mapping::DiscoveredServer;
 use crate::mapping::Policy;
@@ -31,8 +39,24 @@ use crate::mapping::SERVICE_TYPE;
 use crate::registry::Change;
 use crate::registry::Registry;
 
-/// Browses `_agents._tcp` on every interface, on a thread of its own, for the
-/// lifetime of the process.
+#[cfg(not(zeroconf_backend = "mdnsresponder"))]
+use self::mdns_sd as backend;
+#[cfg(zeroconf_backend = "mdnsresponder")]
+use self::mdnsresponder as backend;
+
+/// The name of the thread a backend browses on.
+const THREAD_NAME: &str = "zeroconf-browse";
+
+/// A change that a backend reports.
+#[derive(Debug)]
+pub(crate) enum Event {
+    /// An instance was resolved, for the first time or again.
+    Resolved(ResolvedInstance),
+    /// The instance with this full name left the network.
+    Removed(String),
+}
+
+/// Browses `_agents._tcp` for the lifetime of the process.
 pub(crate) struct Browser {
     registry: Mutex<Registry>,
 }
@@ -44,12 +68,17 @@ impl Browser {
         let browser = Arc::new(Self {
             registry: Mutex::new(Registry::default()),
         });
-        match Arc::clone(&browser).spawn(policy) {
+        let sink = Arc::clone(&browser);
+        match backend::spawn(move |event| sink.apply(event, policy)) {
             Ok(()) => tracing::info!(
-                "zeroconf discovery: browsing {SERVICE_TYPE} (plain HTTP for .local: {})",
+                "zeroconf discovery: browsing {SERVICE_TYPE} with {} (plain HTTP for .local: {})",
+                backend::NAME,
                 policy.allow_http_for_local
             ),
-            Err(err) => tracing::warn!("zeroconf discovery: cannot browse {SERVICE_TYPE}: {err}"),
+            Err(err) => tracing::warn!(
+                "zeroconf discovery: cannot browse {SERVICE_TYPE} with {}: {err}",
+                backend::NAME
+            ),
         }
         browser
     }
@@ -60,30 +89,11 @@ impl Browser {
         self.registry().servers(is_configured)
     }
 
-    fn spawn(self: Arc<Self>, policy: Policy) -> Result<(), String> {
-        let daemon = ServiceDaemon::new().map_err(|err| err.to_string())?;
-        let events = daemon.browse(SERVICE_TYPE).map_err(|err| err.to_string())?;
-        std::thread::Builder::new()
-            .name("zeroconf-browse".to_string())
-            .spawn(move || {
-                // The daemon stops once its last handle is gone, so this
-                // thread keeps one.
-                let _daemon = daemon;
-                while let Ok(event) = events.recv() {
-                    self.apply(event, policy);
-                }
-                tracing::warn!("zeroconf discovery: the mDNS browser stopped");
-            })
-            .map(drop)
-            .map_err(|err| err.to_string())
-    }
-
     /// Applies one event. Each update takes the lock in a statement of its
     /// own, so the guard is gone before anything is logged.
-    fn apply(&self, event: ServiceEvent, policy: Policy) {
+    fn apply(&self, event: Event, policy: Policy) {
         match event {
-            ServiceEvent::ServiceResolved(service) => {
-                let instance = resolved_instance(&service);
+            Event::Resolved(instance) => {
                 let result = self.registry().resolved(&instance, policy);
                 match result {
                     Ok(Change::Added) => {
@@ -101,13 +111,12 @@ impl Browser {
                     }
                 }
             }
-            ServiceEvent::ServiceRemoved(_, fullname) => {
+            Event::Removed(fullname) => {
                 let removed = self.registry().removed(&fullname);
                 if let Some(server) = removed {
                     tracing::info!("zeroconf discovery: lost {fullname} ({})", server.name);
                 }
             }
-            _ => {}
         }
     }
 
@@ -115,25 +124,5 @@ impl Browser {
         // Every update leaves the registry consistent, so a panic elsewhere
         // while holding the lock is no reason to stop discovery.
         self.registry.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-}
-
-/// The library's view of an instance, in the mapping's terms. TXT entries keep
-/// their wire order; `mdns-sd` has already dropped repeated keys.
-fn resolved_instance(service: &ResolvedService) -> ResolvedInstance {
-    ResolvedInstance {
-        fullname: service.fullname.clone(),
-        host: service.host.clone(),
-        port: service.port,
-        txt: service
-            .txt_properties
-            .iter()
-            .map(|property| {
-                (
-                    property.key().to_string(),
-                    property.val().map(<[u8]>::to_vec),
-                )
-            })
-            .collect(),
     }
 }

@@ -38,8 +38,12 @@ git_id=(-c user.name=zeroconf-agent-discovery -c user.email=build@zeroconf-agent
 # in them go back to overlay/; changes anywhere else become patches.
 overlay_dirs=(ext/zeroconf-discovery)
 
-# Cargo packages in the overlay, which `test` runs the unit tests of.
+# Cargo packages in the overlay, which `test` and `check` work on.
 overlay_packages=(zeroconf-discovery)
+overlay_args=()
+for package in "${overlay_packages[@]}"; do
+	overlay_args+=(-p "$package")
+done
 
 # Paths cargo regenerates during a build and that are never patched. Upstream
 # commits Cargo.lock with its workspace crates at version 0.0.0, so every build
@@ -68,6 +72,8 @@ Commands:
           is not exported; 'apply --force' discards it
   build   Compile the codex binary and print its path
   test    Run the unit tests of the overlay crates
+  check   Lint the overlay crates with clippy, run their tests, and check
+          that the codex binary compiles
   all     fetch, apply and build (the default)
   path    Print the path of the built codex binary, without building
 
@@ -81,6 +87,10 @@ Environment:
                    (default: codex/.build)
   CODEX_PROFILE    Cargo profile: dev-small (default, smallest on disk)
                    or release (optimized, slower to build)
+  ZEROCONF_BACKEND The browser for servers on the local network: mdns-sd
+                   (default, its own mDNS stack) or mdnsresponder (macOS
+                   only, the system's mDNSResponder). --version names a
+                   backend other than the default
 EOF
 }
 
@@ -204,6 +214,12 @@ run_cargo() {
 	# The commit of this repository, shown by `codex --version`.
 	local commit
 	commit="$(git -C "$here" describe --always --dirty --abbrev=7 2>/dev/null || echo unknown)"
+	# A backend other than the default follows the commit, under the name of
+	# what it browses through, so that builds with different backends can be
+	# told apart. build.rs rejects any other value.
+	case "${ZEROCONF_BACKEND:-}" in
+	mdnsresponder) commit+=", mDNSResponder" ;;
+	esac
 	# The fork of rusty_v8 links a prebuilt V8 variant (pointer compression and
 	# sandbox) that denoland does not publish. OpenAI publishes it with the
 	# Codex releases, and upstream's Bazel build fetches it from there with
@@ -233,7 +249,7 @@ run_cargo() {
 	(cd "$src/codex-rs" &&
 		env PATH="$bin:$PATH" CARGO_TARGET_DIR="$target" CARGO_NET_GIT_FETCH_WITH_CLI=true \
 			ZEROCONF_AGENT_DISCOVERY_COMMIT="$commit" ${v8_env[@]+"${v8_env[@]}"} \
-			cargo "$@" --profile "$profile")
+			cargo "$1" --profile "$profile" "${@:2}")
 }
 
 # Prints the SHA-256 that upstream's MODULE.bazel pins for the prebuilt V8
@@ -261,11 +277,13 @@ build() {
 }
 
 test_overlay() {
-	local args=() p
-	for p in "${overlay_packages[@]}"; do
-		args+=(-p "$p")
-	done
-	run_cargo test "${args[@]}"
+	run_cargo test "${overlay_args[@]}"
+}
+
+check() {
+	run_cargo clippy "${overlay_args[@]}" --tests -- -D warnings
+	test_overlay
+	run_cargo check -p codex-cli
 }
 
 path() {
@@ -308,6 +326,7 @@ workspace) workspace "${2:-}" ;;
 export) export_workspace ;;
 build) build ;;
 test) test_overlay ;;
+check) check ;;
 path) path ;;
 all)
 	# Separate statements, not `fetch && apply && build`: bash ignores

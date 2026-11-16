@@ -55,6 +55,30 @@ Everything goes to `codex/.build/` unless `CODEX_BUILD_DIR` names another
 directory. Each `apply` resets the source tree there to the pinned release, so
 do not edit files in it by hand.
 
+### Two browsers on macOS
+
+The servers on the local network come from one of two browsers, chosen when
+building:
+
+- `mdns-sd`, the default: an mDNS stack of its own, written in Rust, which
+  behaves the same whatever the operating system does. It suits comparing
+  implementations of the draft.
+- `mdnsresponder`, on macOS only: asks the system's mDNSResponder, through
+  its `dns_sd` API. It answers from the system's cache, so servers announced
+  before Codex started appear at once.
+
+```sh
+ZEROCONF_BACKEND=mdnsresponder codex/build.sh build
+```
+
+Both list the same servers under the same names. One difference remains: when
+a server changes its TXT record or its port without restarting, `mdns-sd`
+shows the change at once, and `mdnsresponder` only after the server is next
+removed and found again. `--version` names mDNSResponder after the commit, as
+in `codex-cli 0.167.0 (zeroconf-agent-discovery <commit>, mDNSResponder)`.
+Switching rebuilds the discovery crate and everything that depends on it, and
+replaces the binary; copy the binary first to keep both.
+
 ## Running
 
 `codex/build.sh path` prints where the binary is, for the same
@@ -167,11 +191,14 @@ codex/build.sh workspace   # apply, then switch the build tree to a branch
 # edit in <build dir>/src/codex-rs, test with codex/build.sh build,
 # and commit on the branch as usual
 codex/build.sh test        # run the unit tests of the overlay crate
+codex/build.sh check       # clippy, the tests, and a check of the binary
 codex/build.sh export      # write the overlay and the patches back here
 ```
 
 The first `test` takes about two minutes, because Cargo compiles the
 dependencies again for the overlay crate on its own; later runs take seconds.
+Run `check` with each browser before exporting, the second time as
+`ZEROCONF_BACKEND=mdnsresponder codex/build.sh check`.
 
 `export` copies the overlay directories (`ext/zeroconf-discovery`) back to
 `overlay/`, and turns every commit that changes anything else into one patch

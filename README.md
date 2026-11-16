@@ -55,6 +55,7 @@ connected, so that Codex connects to none of them until the user asks it to.
 | Run the discovery code inside the Codex app-server                                                                                                                             | Works                                        |
 | Turn an MCP advertisement in the format of [draft -01][draft] into a Codex server entry: TXT checks, the URL from the SRV target, port and `path`, the name `<instance>_local` | Works, with unit tests                       |
 | Browse `_agents._tcp` on the local network                                                                                                                                     | Works on one host; across hosts untested     |
+| Browse through the system's mDNSResponder instead, on macOS: `ZEROCONF_BACKEND=mdnsresponder`                                                                                  | Works on one host; same servers and names    |
 | List the discovered servers in `/mcp`, apart and not connected                                                                                                                 | Works; they come and go in a running session |
 | Connect to a discovered server                                                                                                                                                 | Works: `/mcp connect` or `codex mcp add`     |
 
